@@ -1,0 +1,60 @@
+{
+  "scenario_id": "content_sparse_01",
+  "description": "사진 콘텐츠는 있지만 어떤 이벤트에서 촬영되었는지 명시되지 않음 (capturedDuring 관계 누락)",
+  "existing_triples": [
+    {
+      "subject": "data:content_photo_001",
+      "predicate": "rdf:type",
+      "object": "log:Content"
+    },
+    {
+      "subject": "data:content_photo_001",
+      "predicate": "log:contentType",
+      "object": "photo"
+    },
+    {
+      "subject": "data:content_photo_001",
+      "predicate": "log:timestamp",
+      "object": "2024-04-25T16:30:00"
+    },
+    {
+      "subject": "data:content_photo_001",
+      "predicate": "log:fileSize",
+      "object": "2.5MB"
+    },
+    {
+      "subject": "data:visit_020",
+      "predicate": "rdf:type",
+      "object": "log:VisitEvent"
+    },
+    {
+      "subject": "data:visit_020",
+      "predicate": "log:visitedPlace",
+      "object": "data:place_한강공원"
+    },
+    {
+      "subject": "data:visit_020",
+      "predicate": "log:startTime",
+      "object": "2024-04-25T16:00:00"
+    }
+  ],
+  "missing_triples": [
+    {
+      "subject": "data:content_photo_001",
+      "predicate": "log:capturedDuring",
+      "object": "data:visit_020",
+      "reason": "사진이 어느 방문 이벤트에서 촬영되었는지 명시되지 않음"
+    }
+  ],
+  "expected_predictions": [
+    {
+      "head": "data:content_photo_001",
+      "relation": "log:capturedDuring",
+      "tail_candidates": [
+        "data:visit_020"
+      ]
+    }
+  ],
+  "test_query": "어제 찍은 사진은 어디서 찍은 거야?",
+  "expected_answer": "한강공원 방문 중 촬영하신 것으로 보입니다."
+}

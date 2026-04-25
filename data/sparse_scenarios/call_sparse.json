@@ -1,0 +1,56 @@
+{
+  "scenario_id": "call_sparse_01",
+  "description": "김철수와 통화 기록은 있지만 이후 방문한 카페 기록이 없음 (visitedAfter 관계 누락)",
+  "existing_triples": [
+    {
+      "subject": "data:call_003",
+      "predicate": "rdf:type",
+      "object": "log:CallEvent"
+    },
+    {
+      "subject": "data:call_003",
+      "predicate": "log:calledPerson",
+      "object": "data:person_김철수"
+    },
+    {
+      "subject": "data:call_003",
+      "predicate": "log:startTime",
+      "object": "2024-04-21T14:20:00"
+    },
+    {
+      "subject": "data:visit_007",
+      "predicate": "rdf:type",
+      "object": "log:VisitEvent"
+    },
+    {
+      "subject": "data:visit_007",
+      "predicate": "log:visitedPlace",
+      "object": "data:place_스타벅스_역삼점"
+    },
+    {
+      "subject": "data:visit_007",
+      "predicate": "log:startTime",
+      "object": "2024-04-21T15:30:00"
+    }
+  ],
+  "missing_triples": [
+    {
+      "subject": "data:call_003",
+      "predicate": "log:visitedAfter",
+      "object": "data:visit_007",
+      "reason": "통화 후 카페 방문 관계가 명시되지 않음"
+    }
+  ],
+  "expected_predictions": [
+    {
+      "head": "data:call_003",
+      "relation": "log:visitedAfter",
+      "tail_candidates": [
+        "data:visit_007",
+        "data:visit_012"
+      ]
+    }
+  ],
+  "test_query": "김철수랑 통화하고 나서 들른 카페 어디였지?",
+  "expected_answer": "통화 후 스타벅스 역삼점을 방문하셨을 가능성이 높습니다."
+}

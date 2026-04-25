@@ -1,0 +1,71 @@
+services:
+  fuseki:
+    image: stain/jena-fuseki:latest
+    container_name: fuseki-server
+    ports:
+      - "3030:3030"
+    environment:
+      - ADMIN_PASSWORD=admin123
+      - JVM_ARGS=-Xmx2g
+      - TDB=2
+      - FUSEKI_DATASET_1=smartphone_log
+    volumes:
+      - fuseki-data:/fuseki
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3030/$/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEYS=${GEMINI_API_KEYS}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.3}
+      - LLM_REQUEST_DELAY_SEC=${LLM_REQUEST_DELAY_SEC:-0}
+      - SPARSE_THRESHOLD=${SPARSE_THRESHOLD:-3}
+      - FUSEKI_URL=http://fuseki:3030
+      - FUSEKI_DATASET=${FUSEKI_DATASET:-smartphone_log}
+      - USE_SUPERVISOR_AGENT=${USE_SUPERVISOR_AGENT:-true}
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+    command: python backend/main.py
+    depends_on:
+      fuseki:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "3000:8080"
+    environment:
+      - OPENAI_API_BASE_URLS=http://backend:8000/v1
+      - OPENAI_API_KEYS=anything
+      - WEBUI_AUTH=True
+      - ENABLE_OPENAI_API=true
+      - DEFAULT_MODELS=rdf-kg-agent
+      - ENABLE_SIGNUP=True
+      - BYPASS_MODEL_ACCESS_CONTROL=true
+    volumes:
+      - openwebui-data:/app/backend/data
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  openwebui-data:
+  fuseki-data:

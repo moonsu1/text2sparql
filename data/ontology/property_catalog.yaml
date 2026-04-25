@@ -1,0 +1,612 @@
+# Property Catalog
+# Schema Retrieval에서 사용할 property 메타데이터
+# Text2SPARQL 생성 시 관련 property만 선택적으로 제공
+
+# ============================================================================
+# CALL EVENT PROPERTIES
+# ============================================================================
+
+caller:
+  uri: "http://example.org/smartphone-log#caller"
+  label:
+    en: "caller"
+    ko: "발신자"
+  description:
+    en: "Person who initiated the call"
+    ko: "통화를 건 사람"
+  domain: "log:CallEvent"
+  range: "log:User"
+  aliases:
+    - "전화 건"
+    - "발신"
+    - "통화 시작"
+  keywords:
+    - "call"
+    - "전화"
+    - "통화"
+  example_sparql: "?call log:caller ?user ."
+
+callee:
+  uri: "http://example.org/smartphone-log#callee"
+  label:
+    en: "callee"
+    ko: "수신자"
+  description:
+    en: "Person who received the call"
+    ko: "통화를 받은 사람"
+  domain: "log:CallEvent"
+  range: "log:Person"
+  aliases:
+    - "전화 받은"
+    - "수신"
+    - "통화 상대"
+  keywords:
+    - "call"
+    - "전화"
+    - "통화"
+  example_sparql: "?call log:callee ?person ."
+
+startedAt:
+  uri: "http://example.org/smartphone-log#startedAt"
+  label:
+    en: "started at"
+    ko: "시작 시각"
+  description:
+    en: "Timestamp when the call started"
+    ko: "통화가 시작된 시각"
+  domain: "log:CallEvent"
+  range: "xsd:dateTime"
+  aliases:
+    - "통화 시작"
+    - "시작 시간"
+  keywords:
+    - "when"
+    - "time"
+    - "언제"
+    - "시각"
+  example_sparql: "?call log:startedAt ?time ."
+
+durationSeconds:
+  uri: "http://example.org/smartphone-log#durationSeconds"
+  label:
+    en: "duration (seconds)"
+    ko: "통화 시간(초)"
+  description:
+    en: "Call duration in seconds"
+    ko: "통화 지속 시간 (초 단위)"
+  domain: "log:CallEvent"
+  range: "xsd:integer"
+  aliases:
+    - "통화 시간"
+    - "지속 시간"
+    - "몇 분"
+  keywords:
+    - "duration"
+    - "how long"
+    - "시간"
+    - "길이"
+  example_sparql: "?call log:durationSeconds ?duration ."
+
+callType:
+  uri: "http://example.org/smartphone-log#callType"
+  label:
+    en: "call type"
+    ko: "통화 유형"
+  description:
+    en: "Type of call: outgoing, incoming, missed"
+    ko: "통화 유형: outgoing, incoming, missed"
+  domain: "log:CallEvent"
+  range: "xsd:string"
+  aliases:
+    - "수신/발신"
+    - "부재중"
+  keywords:
+    - "missed"
+    - "outgoing"
+    - "incoming"
+  example_sparql: "?call log:callType ?type ."
+
+# ============================================================================
+# APP USAGE EVENT PROPERTIES
+# ============================================================================
+
+usedApp:
+  uri: "http://example.org/smartphone-log#usedApp"
+  label:
+    en: "used app"
+    ko: "사용한 앱"
+  description:
+    en: "App that was used"
+    ko: "사용자가 사용한 애플리케이션"
+  domain: "log:AppUsageEvent"
+  range: "log:App"
+  aliases:
+    - "사용한 앱"
+    - "쓴 앱"
+    - "실행한 앱"
+    - "열었던 앱"
+  keywords:
+    - "app"
+    - "application"
+    - "앱"
+    - "애플리케이션"
+    - "사용"
+  example_sparql: "?event log:usedApp ?app ."
+
+appEventType:
+  uri: "http://example.org/smartphone-log#appEventType"
+  label:
+    en: "app event type"
+    ko: "앱 이벤트 유형"
+  description:
+    en: "Type of app event: opened, closed, background"
+    ko: "앱 이벤트 유형: opened, closed, background"
+  domain: "log:AppUsageEvent"
+  range: "xsd:string"
+  aliases:
+    - "열었다"
+    - "닫았다"
+    - "백그라운드"
+  keywords:
+    - "opened"
+    - "closed"
+    - "실행"
+  example_sparql: "?event log:appEventType ?type ."
+
+sessionDuration:
+  uri: "http://example.org/smartphone-log#sessionDuration"
+  label:
+    en: "session duration"
+    ko: "세션 시간"
+  description:
+    en: "App usage session duration in seconds"
+    ko: "앱 사용 세션 지속 시간 (초)"
+  domain: "log:AppUsageEvent"
+  range: "xsd:integer"
+  aliases:
+    - "사용 시간"
+    - "얼마나 썼는지"
+  keywords:
+    - "how long"
+    - "duration"
+    - "시간"
+  example_sparql: "?event log:sessionDuration ?duration ."
+
+occurredAt:
+  uri: "http://example.org/smartphone-log#occurredAt"
+  label:
+    en: "occurred at"
+    ko: "발생 시각"
+  description:
+    en: "Timestamp when the event occurred"
+    ko: "이벤트가 발생한 시각"
+  domain: "log:Event"
+  range: "xsd:dateTime"
+  aliases:
+    - "발생 시간"
+    - "언제"
+    - "시각"
+  keywords:
+    - "when"
+    - "time"
+    - "언제"
+    - "시간"
+  example_sparql: "?event log:occurredAt ?time ."
+
+# ============================================================================
+# CALENDAR EVENT PROPERTIES
+# ============================================================================
+
+title:
+  uri: "http://example.org/smartphone-log#title"
+  label:
+    en: "title"
+    ko: "제목"
+  description:
+    en: "Title of the calendar event"
+    ko: "일정의 제목"
+  domain: "log:CalendarEvent"
+  range: "xsd:string"
+  aliases:
+    - "제목"
+    - "일정 이름"
+    - "회의 이름"
+  keywords:
+    - "title"
+    - "name"
+    - "제목"
+    - "이름"
+  example_sparql: "?event log:title ?title ."
+
+startTime:
+  uri: "http://example.org/smartphone-log#startTime"
+  label:
+    en: "start time"
+    ko: "시작 시각"
+  description:
+    en: "Start time of the calendar event"
+    ko: "일정 시작 시각"
+  domain: "log:CalendarEvent"
+  range: "xsd:dateTime"
+  aliases:
+    - "시작 시간"
+    - "시작"
+  keywords:
+    - "start"
+    - "begin"
+    - "시작"
+  example_sparql: "?event log:startTime ?start ."
+
+endTime:
+  uri: "http://example.org/smartphone-log#endTime"
+  label:
+    en: "end time"
+    ko: "종료 시각"
+  description:
+    en: "End time of the calendar event"
+    ko: "일정 종료 시각"
+  domain: "log:CalendarEvent"
+  range: "xsd:dateTime"
+  aliases:
+    - "종료 시간"
+    - "끝나는 시간"
+    - "종료"
+  keywords:
+    - "end"
+    - "finish"
+    - "종료"
+    - "끝"
+  example_sparql: "?event log:endTime ?end ."
+
+eventPlace:
+  uri: "http://example.org/smartphone-log#eventPlace"
+  label:
+    en: "event place"
+    ko: "일정 장소"
+  description:
+    en: "Place where the calendar event takes place"
+    ko: "일정이 열리는 장소"
+  domain: "log:CalendarEvent"
+  range: "log:Place"
+  aliases:
+    - "장소"
+    - "어디서"
+    - "회의실"
+  keywords:
+    - "place"
+    - "location"
+    - "where"
+    - "장소"
+    - "위치"
+  example_sparql: "?event log:eventPlace ?place ."
+
+participant:
+  uri: "http://example.org/smartphone-log#participant"
+  label:
+    en: "participant"
+    ko: "참석자"
+  description:
+    en: "Person participating in the calendar event"
+    ko: "일정에 참여하는 사람"
+  domain: "log:CalendarEvent"
+  range: "log:Person"
+  aliases:
+    - "참석자"
+    - "참여자"
+    - "누가"
+  keywords:
+    - "participant"
+    - "attendee"
+    - "who"
+    - "참석"
+    - "누구"
+  example_sparql: "?event log:participant ?person ."
+
+category:
+  uri: "http://example.org/smartphone-log#category"
+  label:
+    en: "category"
+    ko: "카테고리"
+  description:
+    en: "Category of calendar event: work, personal, meeting, appointment"
+    ko: "일정 카테고리: work, personal, meeting, appointment"
+  domain: "log:CalendarEvent"
+  range: "xsd:string"
+  aliases:
+    - "분류"
+    - "유형"
+  keywords:
+    - "category"
+    - "type"
+    - "카테고리"
+  example_sparql: "?event log:category ?category ."
+
+# ============================================================================
+# VISIT EVENT PROPERTIES
+# ============================================================================
+
+visitor:
+  uri: "http://example.org/smartphone-log#visitor"
+  label:
+    en: "visitor"
+    ko: "방문자"
+  description:
+    en: "User who visited the place"
+    ko: "장소를 방문한 사용자"
+  domain: "log:VisitEvent"
+  range: "log:User"
+  aliases:
+    - "방문자"
+    - "갔다"
+    - "다녀왔다"
+  keywords:
+    - "visitor"
+    - "방문"
+  example_sparql: "?visit log:visitor ?user ."
+
+place:
+  uri: "http://example.org/smartphone-log#place"
+  label:
+    en: "place"
+    ko: "장소"
+  description:
+    en: "Place that was visited"
+    ko: "방문한 장소"
+  domain: "log:VisitEvent"
+  range: "log:Place"
+  aliases:
+    - "장소"
+    - "곳"
+    - "어디"
+    - "카페"
+    - "식당"
+  keywords:
+    - "place"
+    - "location"
+    - "where"
+    - "장소"
+    - "위치"
+  example_sparql: "?visit log:place ?place ."
+
+visitedAt:
+  uri: "http://example.org/smartphone-log#visitedAt"
+  label:
+    en: "visited at"
+    ko: "방문 시각"
+  description:
+    en: "Timestamp when the place was visited"
+    ko: "장소를 방문한 시각"
+  domain: "log:VisitEvent"
+  range: "xsd:dateTime"
+  aliases:
+    - "방문 시간"
+    - "들른 시간"
+  keywords:
+    - "when"
+    - "time"
+    - "언제"
+    - "시각"
+  example_sparql: "?visit log:visitedAt ?time ."
+
+wifiSSID:
+  uri: "http://example.org/smartphone-log#wifiSSID"
+  label:
+    en: "WiFi SSID"
+    ko: "WiFi SSID"
+  description:
+    en: "WiFi network SSID connected at the place"
+    ko: "방문 장소에서 연결된 WiFi SSID"
+  domain: "log:VisitEvent"
+  range: "xsd:string"
+  aliases:
+    - "와이파이"
+    - "WiFi"
+  keywords:
+    - "wifi"
+    - "network"
+  example_sparql: "?visit log:wifiSSID ?ssid ."
+
+stayDuration:
+  uri: "http://example.org/smartphone-log#stayDuration"
+  label:
+    en: "stay duration"
+    ko: "체류 시간"
+  description:
+    en: "Duration of stay at the place in seconds"
+    ko: "장소에 머문 시간 (초)"
+  domain: "log:VisitEvent"
+  range: "xsd:integer"
+  aliases:
+    - "머문 시간"
+    - "체류 시간"
+  keywords:
+    - "how long"
+    - "duration"
+    - "시간"
+  example_sparql: "?visit log:stayDuration ?duration ."
+
+# ============================================================================
+# PLACE PROPERTIES
+# ============================================================================
+
+placeType:
+  uri: "http://example.org/smartphone-log#placeType"
+  label:
+    en: "place type"
+    ko: "장소 유형"
+  description:
+    en: "Type of place: cafe, office, home, restaurant, station"
+    ko: "장소 유형: cafe, office, home, restaurant, station"
+  domain: "log:Place"
+  range: "xsd:string"
+  aliases:
+    - "장소 종류"
+    - "타입"
+  keywords:
+    - "type"
+    - "category"
+    - "종류"
+  example_sparql: "?place log:placeType ?type ."
+
+latitude:
+  uri: "http://example.org/smartphone-log#latitude"
+  label:
+    en: "latitude"
+    ko: "위도"
+  description:
+    en: "Latitude coordinate of the place"
+    ko: "장소의 위도"
+  domain: "log:Place"
+  range: "xsd:decimal"
+  aliases:
+    - "위도"
+  keywords:
+    - "latitude"
+    - "coordinate"
+  example_sparql: "?place log:latitude ?lat ."
+
+longitude:
+  uri: "http://example.org/smartphone-log#longitude"
+  label:
+    en: "longitude"
+    ko: "경도"
+  description:
+    en: "Longitude coordinate of the place"
+    ko: "장소의 경도"
+  domain: "log:Place"
+  range: "xsd:decimal"
+  aliases:
+    - "경도"
+  keywords:
+    - "longitude"
+    - "coordinate"
+  example_sparql: "?place log:longitude ?lng ."
+
+# ============================================================================
+# CONTENT PROPERTIES
+# ============================================================================
+
+createdBy:
+  uri: "http://example.org/smartphone-log#createdBy"
+  label:
+    en: "created by"
+    ko: "생성자"
+  description:
+    en: "User who created the content"
+    ko: "콘텐츠를 생성한 사용자"
+  domain: "log:Content"
+  range: "log:User"
+  aliases:
+    - "촬영자"
+    - "만든 사람"
+  keywords:
+    - "creator"
+    - "author"
+    - "생성"
+  example_sparql: "?content log:createdBy ?user ."
+
+capturedAt:
+  uri: "http://example.org/smartphone-log#capturedAt"
+  label:
+    en: "captured at"
+    ko: "촬영 시각"
+  description:
+    en: "Timestamp when the photo/video was captured"
+    ko: "사진이나 영상을 촬영한 시각"
+  domain: "log:Content"
+  range: "xsd:dateTime"
+  aliases:
+    - "촬영 시간"
+    - "찍은 시간"
+  keywords:
+    - "when"
+    - "time"
+    - "captured"
+    - "언제"
+    - "시각"
+  example_sparql: "?content log:capturedAt ?time ."
+
+capturedPlace:
+  uri: "http://example.org/smartphone-log#capturedPlace"
+  label:
+    en: "captured place"
+    ko: "촬영 장소"
+  description:
+    en: "Place where the content was captured"
+    ko: "콘텐츠를 촬영한 장소"
+  domain: "log:Content"
+  range: "log:Place"
+  aliases:
+    - "촬영 장소"
+    - "찍은 곳"
+  keywords:
+    - "where"
+    - "place"
+    - "location"
+    - "장소"
+  example_sparql: "?content log:capturedPlace ?place ."
+
+relatedEvent:
+  uri: "http://example.org/smartphone-log#relatedEvent"
+  label:
+    en: "related event"
+    ko: "관련 이벤트"
+  description:
+    en: "Event related to this content"
+    ko: "콘텐츠와 연결된 이벤트"
+  domain: "log:Content"
+  range: "log:Event"
+  aliases:
+    - "관련 이벤트"
+    - "연결된 이벤트"
+  keywords:
+    - "related"
+    - "connected"
+    - "관련"
+  example_sparql: "?content log:relatedEvent ?event ."
+
+contentType:
+  uri: "http://example.org/smartphone-log#contentType"
+  label:
+    en: "content type"
+    ko: "콘텐츠 유형"
+  description:
+    en: "Type of content: photo, video, screenshot"
+    ko: "콘텐츠 유형: photo, video, screenshot"
+  domain: "log:Content"
+  range: "xsd:string"
+  aliases:
+    - "사진"
+    - "영상"
+    - "스크린샷"
+  keywords:
+    - "photo"
+    - "video"
+    - "screenshot"
+    - "사진"
+    - "영상"
+  example_sparql: "?content log:contentType ?type ."
+
+# ============================================================================
+# COMMON PROPERTIES (rdfs namespace)
+# ============================================================================
+
+rdfs_label:
+  uri: "http://www.w3.org/2000/01/rdf-schema#label"
+  label:
+    en: "rdfs:label"
+    ko: "레이블 (rdfs:label)"
+  description:
+    en: "Human-readable name for any entity (Person, Place, App, etc.) - USE THIS for names!"
+    ko: "모든 엔티티(사람, 장소, 앱 등)의 사람이 읽기 쉬운 이름 - 이름 검색 시 필수!"
+  domain: "rdfs:Resource"
+  range: "xsd:string"
+  aliases:
+    - "이름"
+    - "라벨"
+    - "name"
+  keywords:
+    - "name"
+    - "label"
+    - "이름"
+  example_sparql: "?entity rdfs:label ?name ."

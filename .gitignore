@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 생성된 데이터 (제외하고 싶으면)
+data/synthetic_logs/*.json
+data/rdf/*.ttl
+
+# 환경변수
+.env
+
+# 테스트
+.pytest_cache/
+htmlcov/
+.coverage
+
+# OS
+.DS_Store
+Thumbs.db

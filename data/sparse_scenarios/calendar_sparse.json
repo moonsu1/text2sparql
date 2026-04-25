@@ -1,0 +1,56 @@
+{
+  "scenario_id": "calendar_sparse_01",
+  "description": "회의 일정은 있지만 참석자 정보가 없음 (attendedBy 관계 누락)",
+  "existing_triples": [
+    {
+      "subject": "data:calendar_005",
+      "predicate": "rdf:type",
+      "object": "log:CalendarEvent"
+    },
+    {
+      "subject": "data:calendar_005",
+      "predicate": "log:eventTitle",
+      "object": "프로젝트 킥오프 회의"
+    },
+    {
+      "subject": "data:calendar_005",
+      "predicate": "log:startTime",
+      "object": "2024-04-24T10:00:00"
+    },
+    {
+      "subject": "data:calendar_005",
+      "predicate": "log:location",
+      "object": "회의실 A"
+    },
+    {
+      "subject": "data:person_최대한",
+      "predicate": "rdf:type",
+      "object": "log:Person"
+    },
+    {
+      "subject": "data:person_최대한",
+      "predicate": "rdfs:label",
+      "object": "최대한"
+    }
+  ],
+  "missing_triples": [
+    {
+      "subject": "data:calendar_005",
+      "predicate": "log:attendedBy",
+      "object": "data:person_최대한",
+      "reason": "회의 참석자가 명시되지 않음"
+    }
+  ],
+  "expected_predictions": [
+    {
+      "head": "data:calendar_005",
+      "relation": "log:attendedBy",
+      "tail_candidates": [
+        "data:person_최대한",
+        "data:person_김철수"
+      ]
+    }
+  ],
+  "test_query": "프로젝트 킥오프 회의에 누가 참석했어?",
+  "expected_answer": "최대한님이 참석하셨을 가능성이 높습니다."
+}

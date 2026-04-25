@@ -1,0 +1,391 @@
+# Smartphone Log Event-Centric Ontology
+# 스마트폰 로그를 Event 중심으로 모델링한 온톨로지
+# 
+# 핵심 설계 원칙:
+# 1. Event를 1급 엔티티로 취급
+# 2. Direct edge (예: User -calls-> Person) 대신 
+#    Event를 통한 관계 표현 (User -caller-> CallEvent -callee-> Person)
+# 3. 모든 Event에 시간, 장소, 근거(provenance) 정보 부착 가능
+# 4. 그래프 쿼리를 통한 복잡한 시간적 관계 추적
+
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+
+@prefix log: <http://example.org/smartphone-log#> .
+
+# ============================================================================
+# CORE CLASSES - 핵심 클래스 정의
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# User - 스마트폰 사용자 (주인공)
+# ----------------------------------------------------------------------------
+log:User rdf:type owl:Class ;
+    rdfs:label "User"@en, "사용자"@ko ;
+    rdfs:comment "스마트폰을 소유하고 사용하는 주인공. 모든 로그 이벤트의 주체."@ko .
+
+# ----------------------------------------------------------------------------
+# Person - 사람 (연락처에 있는 사람들)
+# ----------------------------------------------------------------------------
+log:Person rdf:type owl:Class ;
+    rdfs:label "Person"@en, "사람"@ko ;
+    rdfs:comment "통화하거나 일정에 참여하는 사람. User와 구분됨."@ko .
+
+# ----------------------------------------------------------------------------
+# Place - 장소
+# ----------------------------------------------------------------------------
+log:Place rdf:type owl:Class ;
+    rdfs:label "Place"@en, "장소"@ko ;
+    rdfs:comment "방문하거나 일정이 열리는 물리적 장소."@ko .
+
+# Place 서브타입 (선택적으로 사용 가능)
+log:Home rdf:type owl:Class ;
+    rdfs:subClassOf log:Place ;
+    rdfs:label "Home"@en, "집"@ko .
+
+log:Office rdf:type owl:Class ;
+    rdfs:subClassOf log:Place ;
+    rdfs:label "Office"@en, "사무실"@ko .
+
+log:Cafe rdf:type owl:Class ;
+    rdfs:subClassOf log:Place ;
+    rdfs:label "Cafe"@en, "카페"@ko .
+
+log:Restaurant rdf:type owl:Class ;
+    rdfs:subClassOf log:Place ;
+    rdfs:label "Restaurant"@en, "식당"@ko .
+
+log:Station rdf:type owl:Class ;
+    rdfs:subClassOf log:Place ;
+    rdfs:label "Station"@en, "역"@ko .
+
+# ----------------------------------------------------------------------------
+# App - 애플리케이션
+# ----------------------------------------------------------------------------
+log:App rdf:type owl:Class ;
+    rdfs:label "App"@en, "앱"@ko ;
+    rdfs:comment "스마트폰에서 사용하는 애플리케이션."@ko .
+
+# ----------------------------------------------------------------------------
+# Content - 콘텐츠 (사진, 영상 등)
+# ----------------------------------------------------------------------------
+log:Content rdf:type owl:Class ;
+    rdfs:label "Content"@en, "콘텐츠"@ko ;
+    rdfs:comment "사용자가 생성한 사진, 영상, 스크린샷 등."@ko .
+
+# ============================================================================
+# EVENT CLASSES - 이벤트 클래스 계층
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Event - 모든 이벤트의 최상위 클래스
+# ----------------------------------------------------------------------------
+log:Event rdf:type owl:Class ;
+    rdfs:label "Event"@en, "이벤트"@ko ;
+    rdfs:comment "시간과 공간에서 발생한 모든 이벤트의 추상 클래스. 직접 인스턴스화하지 않고 서브클래스를 사용."@ko .
+
+# ----------------------------------------------------------------------------
+# CallEvent - 통화 이벤트
+# ----------------------------------------------------------------------------
+log:CallEvent rdf:type owl:Class ;
+    rdfs:subClassOf log:Event ;
+    rdfs:label "Call Event"@en, "통화 이벤트"@ko ;
+    rdfs:comment "사용자와 다른 사람 간의 전화 통화."@ko .
+
+# ----------------------------------------------------------------------------
+# AppUsageEvent - 앱 사용 이벤트
+# ----------------------------------------------------------------------------
+log:AppUsageEvent rdf:type owl:Class ;
+    rdfs:subClassOf log:Event ;
+    rdfs:label "App Usage Event"@en, "앱 사용 이벤트"@ko ;
+    rdfs:comment "특정 앱을 열거나 사용한 이벤트."@ko .
+
+# ----------------------------------------------------------------------------
+# CalendarEvent - 캘린더 일정 이벤트
+# ----------------------------------------------------------------------------
+log:CalendarEvent rdf:type owl:Class ;
+    rdfs:subClassOf log:Event ;
+    rdfs:label "Calendar Event"@en, "캘린더 이벤트"@ko ;
+    rdfs:comment "캘린더에 등록된 회의, 약속 등의 일정."@ko .
+
+# ----------------------------------------------------------------------------
+# VisitEvent - 방문 이벤트
+# ----------------------------------------------------------------------------
+log:VisitEvent rdf:type owl:Class ;
+    rdfs:subClassOf log:Event ;
+    rdfs:subClassOf prov:Activity ;
+    rdfs:label "Visit Event"@en, "방문 이벤트"@ko ;
+    rdfs:comment "특정 장소를 방문한 이벤트."@ko .
+
+# ============================================================================
+# PROPERTIES - 관계 및 속성
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 공통 Event 속성
+# ----------------------------------------------------------------------------
+
+log:occurredAt rdf:type owl:DatatypeProperty ;
+    rdfs:label "occurred at"@en, "발생 시각"@ko ;
+    rdfs:comment "이벤트가 발생한 시각 (ISO 8601 timestamp)"@ko ;
+    rdfs:domain log:Event ;
+    rdfs:range xsd:dateTime .
+
+log:label rdf:type owl:DatatypeProperty ;
+    rdfs:label "label"@en, "레이블"@ko ;
+    rdfs:comment "사람이 읽기 쉬운 이름이나 설명"@ko ;
+    rdfs:range xsd:string .
+
+# ----------------------------------------------------------------------------
+# CallEvent 관련 속성
+# ----------------------------------------------------------------------------
+
+log:caller rdf:type owl:ObjectProperty ;
+    rdfs:label "caller"@en, "발신자"@ko ;
+    rdfs:comment "통화를 건 사람. 일반적으로 User."@ko ;
+    rdfs:domain log:CallEvent ;
+    rdfs:range log:User .
+
+log:callee rdf:type owl:ObjectProperty ;
+    rdfs:label "callee"@en, "수신자"@ko ;
+    rdfs:comment "통화를 받은 사람."@ko ;
+    rdfs:domain log:CallEvent ;
+    rdfs:range log:Person .
+
+log:startedAt rdf:type owl:DatatypeProperty ;
+    rdfs:label "started at"@en, "시작 시각"@ko ;
+    rdfs:comment "통화가 시작된 시각"@ko ;
+    rdfs:domain log:CallEvent ;
+    rdfs:range xsd:dateTime .
+
+log:durationSeconds rdf:type owl:DatatypeProperty ;
+    rdfs:label "duration (seconds)"@en, "통화 시간(초)"@ko ;
+    rdfs:comment "통화 지속 시간 (초 단위)"@ko ;
+    rdfs:domain log:CallEvent ;
+    rdfs:range xsd:integer .
+
+log:callType rdf:type owl:DatatypeProperty ;
+    rdfs:label "call type"@en, "통화 유형"@ko ;
+    rdfs:comment "통화 유형: outgoing, incoming, missed"@ko ;
+    rdfs:domain log:CallEvent ;
+    rdfs:range xsd:string .
+
+# ----------------------------------------------------------------------------
+# AppUsageEvent 관련 속성
+# ----------------------------------------------------------------------------
+
+log:usedApp rdf:type owl:ObjectProperty ;
+    rdfs:label "used app"@en, "사용한 앱"@ko ;
+    rdfs:comment "사용자가 사용한 애플리케이션"@ko ;
+    rdfs:domain log:AppUsageEvent ;
+    rdfs:range log:App .
+
+log:appEventType rdf:type owl:DatatypeProperty ;
+    rdfs:label "app event type"@en, "앱 이벤트 유형"@ko ;
+    rdfs:comment "앱 이벤트 유형: opened, closed, background"@ko ;
+    rdfs:domain log:AppUsageEvent ;
+    rdfs:range xsd:string .
+
+log:sessionDuration rdf:type owl:DatatypeProperty ;
+    rdfs:label "session duration"@en, "세션 시간"@ko ;
+    rdfs:comment "앱 사용 세션 지속 시간 (초)"@ko ;
+    rdfs:domain log:AppUsageEvent ;
+    rdfs:range xsd:integer .
+
+log:packageName rdf:type owl:DatatypeProperty ;
+    rdfs:label "package name"@en, "패키지명"@ko ;
+    rdfs:comment "앱의 패키지 식별자 (예: com.naver.news)"@ko ;
+    rdfs:domain log:App ;
+    rdfs:range xsd:string .
+
+# ----------------------------------------------------------------------------
+# CalendarEvent 관련 속성
+# ----------------------------------------------------------------------------
+
+log:participant rdf:type owl:ObjectProperty ;
+    rdfs:label "participant"@en, "참석자"@ko ;
+    rdfs:comment "일정에 참여하는 사람"@ko ;
+    rdfs:domain log:CalendarEvent ;
+    rdfs:range log:Person .
+
+log:title rdf:type owl:DatatypeProperty ;
+    rdfs:label "title"@en, "제목"@ko ;
+    rdfs:comment "일정의 제목"@ko ;
+    rdfs:domain log:CalendarEvent ;
+    rdfs:range xsd:string .
+
+log:startTime rdf:type owl:DatatypeProperty ;
+    rdfs:label "start time"@en, "시작 시각"@ko ;
+    rdfs:comment "일정 시작 시각"@ko ;
+    rdfs:domain log:CalendarEvent ;
+    rdfs:range xsd:dateTime .
+
+log:endTime rdf:type owl:DatatypeProperty ;
+    rdfs:label "end time"@en, "종료 시각"@ko ;
+    rdfs:comment "일정 종료 시각"@ko ;
+    rdfs:domain log:CalendarEvent ;
+    rdfs:range xsd:dateTime .
+
+log:eventPlace rdf:type owl:ObjectProperty ;
+    rdfs:label "event place"@en, "일정 장소"@ko ;
+    rdfs:comment "일정이 열리는 장소"@ko ;
+    rdfs:domain log:CalendarEvent ;
+    rdfs:range log:Place .
+
+log:category rdf:type owl:DatatypeProperty ;
+    rdfs:label "category"@en, "카테고리"@ko ;
+    rdfs:comment "일정 카테고리: work, personal, meeting, appointment"@ko ;
+    rdfs:domain log:CalendarEvent ;
+    rdfs:range xsd:string .
+
+# ----------------------------------------------------------------------------
+# VisitEvent 관련 속성
+# ----------------------------------------------------------------------------
+
+log:visitor rdf:type owl:ObjectProperty ;
+    rdfs:label "visitor"@en, "방문자"@ko ;
+    rdfs:comment "장소를 방문한 사용자"@ko ;
+    rdfs:domain log:VisitEvent ;
+    rdfs:range log:User .
+
+log:place rdf:type owl:ObjectProperty ;
+    rdfs:label "place"@en, "장소"@ko ;
+    rdfs:comment "방문한 장소"@ko ;
+    rdfs:domain log:VisitEvent ;
+    rdfs:range log:Place .
+
+log:visitedAt rdf:type owl:DatatypeProperty ;
+    rdfs:label "visited at"@en, "방문 시각"@ko ;
+    rdfs:comment "장소를 방문한 시각"@ko ;
+    rdfs:domain log:VisitEvent ;
+    rdfs:range xsd:dateTime .
+
+log:wifiSSID rdf:type owl:DatatypeProperty ;
+    rdfs:label "WiFi SSID"@en, "WiFi SSID"@ko ;
+    rdfs:comment "방문 장소에서 연결된 WiFi SSID (장소 식별 단서)"@ko ;
+    rdfs:domain log:VisitEvent ;
+    rdfs:range xsd:string .
+
+log:stayDuration rdf:type owl:DatatypeProperty ;
+    rdfs:label "stay duration"@en, "체류 시간"@ko ;
+    rdfs:comment "장소에 머문 시간 (초)"@ko ;
+    rdfs:domain log:VisitEvent ;
+    rdfs:range xsd:integer .
+
+# ----------------------------------------------------------------------------
+# Place 속성
+# ----------------------------------------------------------------------------
+
+log:placeType rdf:type owl:DatatypeProperty ;
+    rdfs:label "place type"@en, "장소 유형"@ko ;
+    rdfs:comment "장소 유형: cafe, office, home, restaurant, station 등"@ko ;
+    rdfs:domain log:Place ;
+    rdfs:range xsd:string .
+
+log:latitude rdf:type owl:DatatypeProperty ;
+    rdfs:label "latitude"@en, "위도"@ko ;
+    rdfs:comment "장소의 위도"@ko ;
+    rdfs:domain log:Place ;
+    rdfs:range xsd:decimal .
+
+log:longitude rdf:type owl:DatatypeProperty ;
+    rdfs:label "longitude"@en, "경도"@ko ;
+    rdfs:comment "장소의 경도"@ko ;
+    rdfs:domain log:Place ;
+    rdfs:range xsd:decimal .
+
+# ----------------------------------------------------------------------------
+# Content 관련 속성
+# ----------------------------------------------------------------------------
+
+log:createdBy rdf:type owl:ObjectProperty ;
+    rdfs:label "created by"@en, "생성자"@ko ;
+    rdfs:comment "콘텐츠를 생성한 사용자"@ko ;
+    rdfs:domain log:Content ;
+    rdfs:range log:User .
+
+log:capturedAt rdf:type owl:DatatypeProperty ;
+    rdfs:label "captured at"@en, "촬영 시각"@ko ;
+    rdfs:comment "사진이나 영상을 촬영한 시각"@ko ;
+    rdfs:domain log:Content ;
+    rdfs:range xsd:dateTime .
+
+log:capturedPlace rdf:type owl:ObjectProperty ;
+    rdfs:label "captured place"@en, "촬영 장소"@ko ;
+    rdfs:comment "콘텐츠를 촬영한 장소"@ko ;
+    rdfs:domain log:Content ;
+    rdfs:range log:Place .
+
+log:relatedEvent rdf:type owl:ObjectProperty ;
+    rdfs:label "related event"@en, "관련 이벤트"@ko ;
+    rdfs:comment "콘텐츠와 연결된 이벤트 (VisitEvent, CalendarEvent 등)"@ko ;
+    rdfs:domain log:Content ;
+    rdfs:range log:Event .
+
+log:contentType rdf:type owl:DatatypeProperty ;
+    rdfs:label "content type"@en, "콘텐츠 유형"@ko ;
+    rdfs:comment "콘텐츠 유형: photo, video, screenshot"@ko ;
+    rdfs:domain log:Content ;
+    rdfs:range xsd:string .
+
+log:filePath rdf:type owl:DatatypeProperty ;
+    rdfs:label "file path"@en, "파일 경로"@ko ;
+    rdfs:comment "콘텐츠 파일의 저장 경로"@ko ;
+    rdfs:domain log:Content ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# PROVENANCE - 데이터 근거 추적
+# ============================================================================
+
+# RawLog - 원본 로그 레코드
+log:RawLog rdf:type owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Raw Log"@en, "원본 로그"@ko ;
+    rdfs:comment "JSON/CSV에서 읽은 원본 로그 레코드. Event의 근거가 됨."@ko .
+
+log:sourceFile rdf:type owl:DatatypeProperty ;
+    rdfs:label "source file"@en, "소스 파일"@ko ;
+    rdfs:comment "원본 로그가 저장된 파일명"@ko ;
+    rdfs:domain log:RawLog ;
+    rdfs:range xsd:string .
+
+log:rowIndex rdf:type owl:DatatypeProperty ;
+    rdfs:label "row index"@en, "행 번호"@ko ;
+    rdfs:comment "파일 내에서의 행 번호 (0-based)"@ko ;
+    rdfs:domain log:RawLog ;
+    rdfs:range xsd:integer .
+
+# 모든 Event는 prov:wasDerivedFrom으로 RawLog와 연결
+# 예: data:call_001 prov:wasDerivedFrom data:rawlog_call_001 .
+
+# ============================================================================
+# TEMPORAL RELATIONS - 시간적 관계 (선택적)
+# ============================================================================
+
+log:happenedBefore rdf:type owl:ObjectProperty ;
+    rdfs:label "happened before"@en, "먼저 발생"@ko ;
+    rdfs:comment "한 이벤트가 다른 이벤트보다 먼저 발생함"@ko ;
+    rdfs:domain log:Event ;
+    rdfs:range log:Event .
+
+log:happenedAfter rdf:type owl:ObjectProperty ;
+    rdfs:label "happened after"@en, "이후 발생"@ko ;
+    rdfs:comment "한 이벤트가 다른 이벤트 이후에 발생함"@ko ;
+    rdfs:domain log:Event ;
+    rdfs:range log:Event ;
+    owl:inverseOf log:happenedBefore .
+
+# ============================================================================
+# 온톨로지 메타데이터
+# ============================================================================
+
+<http://example.org/smartphone-log> rdf:type owl:Ontology ;
+    rdfs:label "Smartphone Log Event-Centric Ontology"@en ;
+    rdfs:label "스마트폰 로그 이벤트 중심 온톨로지"@ko ;
+    rdfs:comment "스마트폰 로그를 Event 중심으로 모델링한 학습용 온톨로지"@ko ;
+    owl:versionInfo "1.0" ;
+    prov:wasGeneratedBy "cursor_text2sparql prototype project" .

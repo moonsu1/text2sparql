@@ -1,0 +1,51 @@
+{
+  "scenario_id": "visit_sparse_01",
+  "description": "카페 방문 기록은 있지만 누구와 만났는지 통화 기록이 없음 (metDuring 관계 누락)",
+  "existing_triples": [
+    {
+      "subject": "data:visit_012",
+      "predicate": "rdf:type",
+      "object": "log:VisitEvent"
+    },
+    {
+      "subject": "data:visit_012",
+      "predicate": "log:visitedPlace",
+      "object": "data:place_투썸플레이스_강남점"
+    },
+    {
+      "subject": "data:visit_012",
+      "predicate": "log:startTime",
+      "object": "2024-04-23T14:00:00"
+    },
+    {
+      "subject": "data:person_박민수",
+      "predicate": "rdf:type",
+      "object": "log:Person"
+    },
+    {
+      "subject": "data:person_박민수",
+      "predicate": "rdfs:label",
+      "object": "박민수"
+    }
+  ],
+  "missing_triples": [
+    {
+      "subject": "data:visit_012",
+      "predicate": "log:metDuring",
+      "object": "data:person_박민수",
+      "reason": "방문 중 만난 사람이 명시되지 않음"
+    }
+  ],
+  "expected_predictions": [
+    {
+      "head": "data:visit_012",
+      "relation": "log:metDuring",
+      "tail_candidates": [
+        "data:person_박민수",
+        "data:person_이영희"
+      ]
+    }
+  ],
+  "test_query": "투썸플레이스에서 누구 만났어?",
+  "expected_answer": "박민수님을 만나셨을 가능성이 높습니다."
+}

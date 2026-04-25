@@ -1,0 +1,36 @@
+[project]
+name = "cursor-text2sparql"
+version = "1.0.0"
+description = "Smartphone Log to SPARQL Prototype - Event-Centric Ontology Learning Project"
+authors = [
+    {name = "User", email = "user@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "rdflib>=7.0.0",
+    "pandas>=2.2.0",
+    "requests>=2.31.0",
+    "pyyaml>=6.0.1",
+    "python-dateutil>=2.9.0",
+    "click>=8.1.7",
+    "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"

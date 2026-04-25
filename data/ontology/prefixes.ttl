@@ -1,0 +1,13 @@
+# Common Prefix Definitions
+# 모든 RDF 파일에서 공통으로 사용할 prefix들을 정의
+
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix time: <http://www.w3.org/2006/time#> .
+
+# 우리 프로젝트의 메인 namespace
+@prefix log: <http://example.org/smartphone-log#> .
+@prefix data: <http://example.org/data/> .
