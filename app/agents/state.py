@@ -17,6 +17,7 @@ class AgentState(TypedDict):
     
     # Query Analysis
     intent: Optional[str]
+    target_relation: Optional[str]
     entities: Dict[str, Any]
     time_constraint: Optional[Dict[str, Any]]
     
@@ -36,6 +37,7 @@ class AgentState(TypedDict):
     # Link Prediction
     predicted_triples: Annotated[List[tuple], add]
     prediction_confidence: Annotated[List[float], add]
+    prediction_evidence: Annotated[List[Dict[str, Any]], add]
     
     # SPARQL Generation
     sparql_query: Optional[str]

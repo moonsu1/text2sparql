@@ -565,6 +565,65 @@ relatedEvent:
     - "관련"
   example_sparql: "?content log:relatedEvent ?event ."
 
+visitedAfter:
+  uri: "http://example.org/smartphone-log#visitedAfter"
+  label:
+    en: "visited after"
+    ko: "통화 후 방문"
+  description:
+    en: "Request-scoped inferred relation from a CallEvent to a likely subsequent VisitEvent"
+    ko: "통화 이후의 시간/장소 근거로 예측한 CallEvent-VisitEvent 관계"
+  domain: "log:CallEvent"
+  range: "log:VisitEvent"
+  aliases:
+    - "통화 후 방문"
+    - "통화하고 나서 간 곳"
+  keywords:
+    - "after call"
+    - "visited after"
+    - "통화 후"
+    - "들른"
+  example_sparql: "# request-scoped only: VALUES (?call ?visit) { (<call_uri> <visit_uri>) }"
+
+metDuring:
+  uri: "http://example.org/smartphone-log#metDuring"
+  label:
+    en: "met during"
+    ko: "방문 중 만난 사람"
+  description:
+    en: "Request-scoped inferred relation from a VisitEvent to a likely person met during that visit"
+    ko: "방문 시간 직전의 통화/동시성 근거로 예측한 VisitEvent-Person 관계"
+  domain: "log:VisitEvent"
+  range: "log:Person"
+  aliases:
+    - "방문 중 만난"
+    - "카페에서 만난 사람"
+  keywords:
+    - "met"
+    - "during visit"
+    - "누구 만났"
+  example_sparql: "# request-scoped only: VALUES (?visit ?person) { (<visit_uri> <person_uri>) }"
+
+usedDuring:
+  uri: "http://example.org/smartphone-log#usedDuring"
+  label:
+    en: "used during"
+    ko: "일정 준비 중 사용"
+  description:
+    en: "Request-scoped inferred relation from an AppUsageEvent to a likely related CalendarEvent"
+    ko: "회의/일정 전후의 시간 근거와 앱 유형으로 예측한 AppUsageEvent-CalendarEvent 관계"
+  domain: "log:AppUsageEvent"
+  range: "log:CalendarEvent"
+  aliases:
+    - "준비할 때 쓴 앱"
+    - "회의와 관련된 앱 사용"
+  keywords:
+    - "used during"
+    - "app before meeting"
+    - "준비할 때"
+    - "앱"
+  example_sparql: "# request-scoped only: VALUES (?appEvent ?calendar) { (<app_evt_uri> <cal_uri>) }"
+
 contentType:
   uri: "http://example.org/smartphone-log#contentType"
   label:

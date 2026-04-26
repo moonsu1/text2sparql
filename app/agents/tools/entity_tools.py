@@ -25,6 +25,16 @@ NAME_MAPPING = {
     "수현": "Jung Su",
 }
 
+NAME_MAPPING.update({
+    "김철수": "Kim Chul",
+    "철수": "Kim Chul",
+    "최대한": "Choi Dae",
+    "이영희": "Lee Young",
+    "박민지": "Park Min",
+    "정수진": "Jung Su",
+    "수진": "Jung Su",
+})
+
 
 def resolve_korean_name(name: str) -> str:
     """한글 이름을 영어 부분 이름으로 변환"""
@@ -175,9 +185,8 @@ def resolve_place_entity(place_type: str) -> List[Dict[str, str]]:
         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
         
         SELECT DISTINCT ?place ?label ?type WHERE {{
-            ?place a log:Place .
             ?place rdfs:label ?label .
-            OPTIONAL {{ ?place log:placeType ?type . }}
+            ?place log:placeType ?type .
             FILTER(CONTAINS(LCASE(?label), LCASE("{place_type}")) || 
                    CONTAINS(LCASE(STR(?type)), LCASE("{place_type}")))
         }}

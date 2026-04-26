@@ -1,106 +1,101 @@
 """
-Supervisor Stage Nodes
-각 Stage의 실제 로직 구현
+Supervisor stage nodes.
 
-각 stage는 focused tools만 사용하므로 Gemini Flash도 안정적으로 처리합니다.
+Each stage is intentionally narrow: query analysis, entity resolution,
+SPARQL generation, execution, sparse relation completion, and answer writing.
 """
 
-import sys
-import re
 import json
-from pathlib import Path
-from typing import Dict, Any
+import re
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from app.agents.state import AgentState
 from app.agents.llm_client import call_llm
+from app.agents.state import AgentState
 from app.agents.tools.entity_tools import (
+    resolve_korean_name,
     resolve_person_entity,
     resolve_place_entity,
-    resolve_korean_name,
 )
-from app.agents.tools.sparql_tools import generate_sparql, verify_sparql_syntax
 from app.agents.tools.execution_tools import execute_sparql_on_fuseki, verify_results_quality
-from app.agents.tools.link_prediction_tools import predict_missing_links_for_person
+from app.agents.tools.link_prediction_tools import predict_sparse_relations
+from app.agents.tools.sparql_tools import generate_sparql, verify_sparql_syntax
 
-
-# ═══════════════════════════════════════════════════════
-# Stage 0: Query Analysis
-# ═══════════════════════════════════════════════════════
 
 def query_analysis_stage(state: AgentState) -> Dict[str, Any]:
-    """
-    Stage 0: 사용자 질의 분석
-    - intent, entities, time_constraint 추출
-    - 기존 query_analysis_node 로직과 동일
-    """
+    """Extract intent, entities, time hints, and target relation."""
     print("\n[STAGE] Query Analysis")
-    
+
     query = state["query"]
-    
-    analysis_prompt = f"""다음 질문을 분석하세요:
 
-질문: "{query}"
+    analysis_prompt = f"""
+다음 질의를 JSON으로 분석하세요.
 
-다음 정보를 JSON 형식으로 추출하세요:
-1. intent: 질문의 의도 (recent_calls, most_used_app, visited_places, call_after_cafe, meeting_location, photos_at_place 중 하나)
-2. time_constraint: 시간 제약 (어제, 최근, 지난주 등, 없으면 null)
-3. person_mention: 언급된 사람 이름 (없으면 null)
-4. place_type: 언급된 장소 유형 (카페, 식당, 회사 등, 없으면 null)
+질의: "{query}"
 
-JSON 형식으로만 답하세요:
+필드:
+1. intent: recent_calls, most_used_app, visited_places, call_after_cafe, meeting_location, photos_at_place, sparse_completion 중 하나
+2. target_relation: visitedAfter, metDuring, relatedEvent, usedDuring 중 하나. 없으면 null
+3. time_constraint: 어제, 최근, 지난주 등 상대 시간. 없으면 null
+4. person_mention: 언급된 사람 이름. 없으면 null
+5. place_type: 카페, 식당, 회사 같은 장소 유형. 없으면 null
+6. place_mention: 스타벅스, 투썸플레이스 같은 구체 장소명. 없으면 null
+7. event_title: 디자인 리뷰 같은 일정/회의 제목. 없으면 null
+
+JSON만 출력하세요:
 {{
   "intent": "...",
+  "target_relation": "...",
   "time_constraint": "...",
   "person_mention": "...",
-  "place_type": "..."
-}}"""
-    
+  "place_type": "...",
+  "place_mention": "...",
+  "event_title": "..."
+}}
+"""
+
     result = call_llm(
-        system_prompt="당신은 질의 분석 전문가입니다.",
+        system_prompt="당신은 스마트폰 로그 질의 분석 전문가입니다.",
         user_prompt=analysis_prompt,
-        temperature=0.1
+        temperature=0.1,
     )
-    
-    # JSON 파싱
+
     analysis = _parse_json_safe(result)
-    
-    intent = analysis.get("intent")
-    person_mention = analysis.get("person_mention")
-    
-    # 한글 이름 → 영어 변환
+
+    intent = _none_if_null(analysis.get("intent")) or _infer_intent_from_query(query)
+    target_relation = _none_if_null(analysis.get("target_relation")) or _infer_target_relation_from_query(query)
+    person_mention = _none_if_null(analysis.get("person_mention")) or _extract_person_mention(query)
+    place_type = _normalize_place_type(_none_if_null(analysis.get("place_type"))) or _extract_place_type(query)
+    place_mention = _none_if_null(analysis.get("place_mention")) or _extract_place_mention(query)
+    event_title = _none_if_null(analysis.get("event_title")) or _extract_event_title(query)
+
     if person_mention:
         eng_name = resolve_korean_name(person_mention)
         if eng_name != person_mention:
-            print(f"  [Analysis] 이름 변환: {person_mention} → {eng_name}")
+            print(f"  [Analysis] name normalized: {person_mention} -> {eng_name}")
             person_mention = eng_name
-    
+
     entities = {
         "person": person_mention,
-        "place_type": analysis.get("place_type")
+        "place_type": place_type,
+        "place_mention": place_mention,
+        "event_title": event_title,
     }
-    
-    # 시간 제약 처리
-    time_constraint = None
-    time_word = analysis.get("time_constraint")
-    if time_word and time_word != "null":
-        time_map = {"어제": -1, "그제": -2, "최근": -7, "지난주": -7}
-        days_ago = time_map.get(time_word, -7)
-        target_date = datetime.now() + timedelta(days=days_ago)
-        time_constraint = {
-            "word": time_word,
-            "date": target_date.date().isoformat(),
-            "start_datetime": target_date.replace(hour=0, minute=0).isoformat()
-        }
-    
+
+    time_constraint = _build_time_constraint(_none_if_null(analysis.get("time_constraint")))
+
     print(f"  Intent: {intent}")
+    print(f"  Target relation: {target_relation}")
     print(f"  Entities: {entities}")
     print(f"  Time: {time_constraint}")
-    
+
     return {
         "intent": intent,
+        "target_relation": target_relation,
         "entities": entities,
         "time_constraint": time_constraint,
         "workflow_path": ["query_analysis"],
@@ -111,261 +106,172 @@ JSON 형식으로만 답하세요:
     }
 
 
-# ═══════════════════════════════════════════════════════
-# Stage 1: Entity Resolution
-# ═══════════════════════════════════════════════════════
-
 def entity_resolution_stage(state: AgentState) -> Dict[str, Any]:
-    """
-    Stage 1: 엔티티 추출 (Entity Resolution)
-    - Person URI 해결
-    - Place URI 해결
-    Tools: resolve_person_entity, resolve_place_entity
-    """
+    """Resolve person and place mentions to KG entities when available."""
     print("\n[STAGE] Entity Resolution")
-    
+
     entities = state.get("entities", {})
     resolved = dict(state.get("resolved_entities", {}))
-    
+
     person_name = entities.get("person")
-    place_type = entities.get("place_type")
-    
-    # Person 해결
+    place_query = entities.get("place_mention") or entities.get("place_type")
+
     if person_name and not resolved.get("person"):
         person_result = resolve_person_entity(person_name)
         if person_result:
             resolved["person"] = person_result
-            print(f"  Person 해결: {person_result.get('label')} ({person_result.get('uri', '')[:40]})")
+            print(f"  Person resolved: {person_result.get('label')}")
         else:
-            print(f"  Person '{person_name}' 해결 실패 → 이름 그대로 사용")
+            print(f"  Person '{person_name}' not found; using search text")
             resolved["person"] = {"uri": None, "label": person_name, "search_name": person_name}
-    
-    # Place 해결
-    if place_type and not resolved.get("place"):
-        place_results = resolve_place_entity(place_type)
+
+    if place_query and not resolved.get("place"):
+        place_results = resolve_place_entity(place_query)
         if place_results:
             resolved["place"] = place_results
-            labels = [p.get("label", "") for p in place_results[:2]]
-            print(f"  Place 해결: {labels}")
+            labels = [place.get("label", "") for place in place_results[:2]]
+            print(f"  Place resolved: {labels}")
         else:
-            print(f"  Place '{place_type}' 해결 실패")
+            print(f"  Place '{place_query}' not found")
             resolved["place"] = []
-    
+
     return {
         "resolved_entities": resolved,
         "workflow_path": ["entity_resolution"],
     }
 
 
-# ═══════════════════════════════════════════════════════
-# Stage 2: SPARQL Generation
-# ═══════════════════════════════════════════════════════
-
 def sparql_generation_stage(state: AgentState) -> Dict[str, Any]:
-    """
-    Stage 2: SPARQL 쿼리 생성
-    - LLM으로 SPARQL 생성
-    - 구문 검증
-    Tools: generate_sparql, verify_sparql_syntax
-    """
+    """Generate a SPARQL query from the current state."""
     print("\n[STAGE] SPARQL Generation")
-    
+
     query = state["query"]
-    intent = state.get("intent", "unknown")
-    entities = state.get("entities", {})
-    resolved = state.get("resolved_entities", {})
-    time_constraint = state.get("time_constraint")
-    predicted_triples = state.get("predicted_triples", [])
+    entities_text = _format_entities_for_sparql_prompt(state)
+    time_info = _format_time_info(state.get("time_constraint"))
     sparql_retry_count = state.get("sparql_retry_count", 0)
-    
-    # 엔티티 텍스트 조합 (resolved URI + label 정보 포함)
-    entity_parts = []
-    
-    person_info = resolved.get("person")
-    if person_info:
-        if isinstance(person_info, dict):
-            label = person_info.get("label", "")
-            search_name = person_info.get("search_name", label)
-            entity_parts.append(f"person: {label} (search_name: {search_name})")
-        else:
-            entity_parts.append(f"person: {person_info}")
-    elif entities.get("person"):
-        entity_parts.append(f"person: {entities['person']}")
-    
-    place_info = resolved.get("place")
-    if place_info and isinstance(place_info, list) and place_info:
-        labels = [p.get("label", "") for p in place_info[:2]]
-        entity_parts.append(f"place: {', '.join(labels)}")
-    elif entities.get("place_type"):
-        entity_parts.append(f"place_type: {entities['place_type']}")
-    
-    entities_text = "; ".join(entity_parts) if entity_parts else "없음"
-    
-    # 시간 정보
-    time_info = "없음"
-    if time_constraint:
-        time_info = f"{time_constraint['word']} ({time_constraint['date']} 이후)"
-    
-    # SPARQL 생성
+
     sparql_query = generate_sparql(
         query=query,
-        intent=intent,
+        intent=state.get("intent", "unknown"),
         entities_text=entities_text,
         time_info=time_info,
-        predicted_triples=predicted_triples if predicted_triples else None
+        predicted_triples=state.get("predicted_triples") or None,
+        prediction_confidence=state.get("prediction_confidence") or None,
+        prediction_evidence=state.get("prediction_evidence") or None,
+        target_relation=state.get("target_relation"),
     )
-    
-    # 구문 검증
+
     validation = verify_sparql_syntax(sparql_query)
     if not validation["is_valid"]:
-        print(f"  [WARNING] SPARQL 구문 오류: {validation['error']}")
-    
+        print(f"  [WARNING] SPARQL syntax issue: {validation['error']}")
+
     return {
         "sparql_query": sparql_query,
-        "sparql_results": None,  # 새로운 SPARQL이므로 결과 초기화
+        "sparql_results": None,
         "result_verification": None,
         "sparql_retry_count": sparql_retry_count + 1,
         "workflow_path": ["sparql_generation"],
     }
 
 
-# ═══════════════════════════════════════════════════════
-# Stage 3: Execution
-# ═══════════════════════════════════════════════════════
-
 def execution_stage(state: AgentState) -> Dict[str, Any]:
-    """
-    Stage 3: SPARQL 실행 & 결과 검증
-    Tools: execute_sparql_on_fuseki, verify_results_quality
-    """
+    """Run SPARQL on Fuseki and verify result quality."""
     print("\n[STAGE] Execution")
-    
+
     sparql_query = state.get("sparql_query", "")
-    
     if not sparql_query:
         return {
             "sparql_results": [],
             "execution_time_ms": 0.0,
-            "result_verification": {"is_complete": False, "issue": "empty", "suggestion": "SPARQL 없음"},
-            "error": "SPARQL 쿼리가 없습니다",
+            "result_verification": {"is_complete": False, "issue": "empty", "suggestion": "SPARQL query missing"},
+            "error": "SPARQL query missing",
             "workflow_path": ["execution"],
         }
-    
-    # 실행
+
     exec_result = execute_sparql_on_fuseki(sparql_query)
     results = exec_result["results"]
-    execution_time = exec_result["execution_time_ms"]
-    
-    # 결과 검증
     verification = verify_results_quality(results)
-    
-    print(f"  결과: {len(results)}건, 검증: {verification['issue']}")
-    
+
+    print(f"  Results: {len(results)} rows; quality={verification['issue']}")
+
     return {
         "sparql_results": results,
-        "execution_time_ms": execution_time,
+        "execution_time_ms": exec_result["execution_time_ms"],
         "result_verification": verification,
         "workflow_path": ["execution"],
     }
 
 
-# ═══════════════════════════════════════════════════════
-# Stage 4: Link Prediction
-# ═══════════════════════════════════════════════════════
-
 def link_prediction_stage(state: AgentState) -> Dict[str, Any]:
-    """
-    Stage 4: Link Prediction (GCN+TransE)
-    - Sparse data 보강
-    Tools: predict_missing_links_for_person
-    """
+    """Complete sparse relations from observed temporal/place/person evidence."""
     print("\n[STAGE] Link Prediction")
-    
-    resolved = state.get("resolved_entities", {})
-    entities = state.get("entities", {})
-    
-    # Person 이름 결정
-    person_name = None
-    person_info = resolved.get("person")
-    if isinstance(person_info, dict):
-        person_name = person_info.get("search_name") or person_info.get("label")
-    elif entities.get("person"):
-        person_name = entities["person"]
-    
-    predicted_triples = []
-    confidences = []
-    
-    if person_name:
-        raw_predictions = predict_missing_links_for_person(person_name)
-        
-        for head, tail, conf in raw_predictions:
-            predicted_triples.append((head, "http://example.org/smartphone-log#visitedAfter", tail))
-            confidences.append(conf)
-        
-        print(f"  예측 완료: {len(predicted_triples)}개 triple")
-    else:
-        print("  Person 정보 없음 → Link prediction 스킵")
-    
+
+    result = predict_sparse_relations(state)
+    predictions = result.get("predictions", [])
+
+    predicted_triples = [
+        (prediction["head"], prediction["relation"], prediction["tail"])
+        for prediction in predictions
+    ]
+    confidences = [prediction["confidence"] for prediction in predictions]
+
+    print(f"  Target relation: {result.get('target_relation')}")
+    print(f"  Predictions: {len(predicted_triples)} triples")
+
     return {
+        "target_relation": result.get("target_relation") or state.get("target_relation"),
         "predicted_triples": predicted_triples,
         "prediction_confidence": confidences,
+        "prediction_evidence": predictions,
         "link_prediction_done": True,
-        "sparql_query": None,  # SPARQL 재생성을 위해 초기화
+        "sparql_query": None,
         "sparql_results": None,
         "result_verification": None,
         "workflow_path": ["link_prediction"],
     }
 
 
-# ═══════════════════════════════════════════════════════
-# Stage 5: Answer Generation
-# ═══════════════════════════════════════════════════════
-
 def answer_generation_stage(state: AgentState) -> Dict[str, Any]:
-    """
-    Stage 5: 최종 자연어 답변 생성
-    - LLM으로 결과를 자연어로 변환
-    """
+    """Generate the final user-facing answer."""
     print("\n[STAGE] Answer Generation")
-    
+
     from app.prompts.answer_generation import (
         ANSWER_GENERATION_SYSTEM,
         ANSWER_GENERATION_USER_TEMPLATE,
+        format_link_prediction_for_prompt,
         format_results_for_prompt,
-        format_link_prediction_for_prompt
     )
-    
+
     results_text = format_results_for_prompt(state.get("sparql_results") or [])
-    
     link_pred_info = format_link_prediction_for_prompt(
         state.get("predicted_triples", []),
-        state.get("prediction_confidence", [])
+        state.get("prediction_confidence", []),
+        state.get("prediction_evidence", []),
     )
-    
+
     user_prompt = ANSWER_GENERATION_USER_TEMPLATE.format(
         query=state["query"],
         sparql_query=state.get("sparql_query", "없음"),
         results=results_text,
-        link_prediction_info=link_pred_info
+        link_prediction_info=link_pred_info,
     )
-    
+
     answer = call_llm(
         system_prompt=ANSWER_GENERATION_SYSTEM,
         user_prompt=user_prompt,
-        temperature=0.5
+        temperature=0.5,
     )
-    
-    # Sources 추출
+
     sources = []
-    for result in (state.get("sparql_results") or []):
-        for key, value in result.items():
+    for result in state.get("sparql_results") or []:
+        for value in result.values():
             if "data/" in str(value):
                 event_id = str(value).split("/")[-1]
                 if event_id not in sources:
                     sources.append(event_id)
-    
-    print(f"  답변 생성 완료 ({len(answer)} chars)")
-    
+
+    print(f"  Answer generated ({len(answer)} chars)")
+
     return {
         "answer": answer,
         "sources": sources,
@@ -373,18 +279,162 @@ def answer_generation_stage(state: AgentState) -> Dict[str, Any]:
     }
 
 
-# ── 헬퍼 함수 ──────────────────────────────────────────
-
-def _parse_json_safe(text: str) -> dict:
-    """LLM 출력에서 JSON 안전하게 파싱"""
+def _parse_json_safe(text: str) -> Dict[str, Any]:
+    """Parse a JSON object from an LLM response."""
     try:
-        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        json_match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
         if json_match:
             return json.loads(json_match.group(1))
-        
-        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+
+        json_match = re.search(r"\{.*\}", text, re.DOTALL)
         if json_match:
             return json.loads(json_match.group(0))
     except Exception:
         pass
     return {}
+
+
+def _none_if_null(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"null", "none", "없음", "n/a"}:
+        return None
+    return text
+
+
+def _build_time_constraint(time_word: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not time_word:
+        return None
+
+    time_map = {
+        "어제": -1,
+        "그제": -2,
+        "최근": -7,
+        "지난주": -7,
+    }
+    days_ago = time_map.get(time_word, -7)
+    target_date = datetime.now() + timedelta(days=days_ago)
+    return {
+        "word": time_word,
+        "date": target_date.date().isoformat(),
+        "start_datetime": target_date.replace(hour=0, minute=0).isoformat(),
+    }
+
+
+def _infer_intent_from_query(query: str) -> str:
+    normalized = query.lower()
+    if any(word in normalized for word in ["가능성", "가능성이", "연결", "통화하고 나서", "준비할 때"]):
+        return "sparse_completion"
+    if "사진" in normalized:
+        return "photos_at_place"
+    if "앱" in normalized:
+        return "most_used_app"
+    if "방문" in normalized or "들른" in normalized:
+        return "visited_places"
+    if "통화" in normalized:
+        return "recent_calls"
+    return "unknown"
+
+
+def _infer_target_relation_from_query(query: str) -> Optional[str]:
+    normalized = query.lower()
+    if any(word in normalized for word in ["사진", "photo", "콘텐츠", "찍은"]):
+        return "relatedEvent"
+    if any(word in normalized for word in ["앱", "app", "notion", "slack", "gmail"]):
+        return "usedDuring"
+    if any(word in normalized for word in ["누구", "만났", "만난", "met"]):
+        return "metDuring"
+    if any(word in normalized for word in ["통화", "call"]) and any(
+        word in normalized for word in ["후", "뒤", "나서", "after"]
+    ):
+        return "visitedAfter"
+    return None
+
+
+def _extract_person_mention(query: str) -> Optional[str]:
+    english = re.search(r"[A-Z][A-Za-z.-]+(?:\s+[A-Z][A-Za-z.-]+)+", query)
+    if english:
+        return english.group(0).strip()
+
+    for name in ["김철수", "최대한", "이영희", "박민지", "정수진", "철수", "수진"]:
+        if name in query:
+            return name
+    return None
+
+
+def _extract_place_type(query: str) -> Optional[str]:
+    normalized = query.lower()
+    if "카페" in normalized or "cafe" in normalized or "스타벅스" in normalized or "투썸" in normalized:
+        return "cafe"
+    if "식당" in normalized or "음식점" in normalized or "restaurant" in normalized:
+        return "restaurant"
+    if "회사" in normalized or "오피스" in normalized or "office" in normalized:
+        return "office"
+    return None
+
+
+def _normalize_place_type(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"카페", "cafe"}:
+        return "cafe"
+    if normalized in {"식당", "음식점", "restaurant"}:
+        return "restaurant"
+    if normalized in {"회사", "오피스", "office"}:
+        return "office"
+    return value
+
+
+def _extract_place_mention(query: str) -> Optional[str]:
+    for keyword in ["스타벅스", "투썸플레이스", "투썸", "샐러디", "맥도날드"]:
+        if keyword in query:
+            return keyword
+    return None
+
+
+def _extract_event_title(query: str) -> Optional[str]:
+    for title in ["디자인 리뷰", "제품 기획 회의", "전체 회의", "1:1 미팅"]:
+        if title in query:
+            return title
+    if "디자인" in query and "리뷰" in query:
+        return "디자인 리뷰"
+    return None
+
+
+def _format_entities_for_sparql_prompt(state: AgentState) -> str:
+    entities = state.get("entities", {})
+    resolved = state.get("resolved_entities", {})
+    parts = []
+
+    person_info = resolved.get("person")
+    if isinstance(person_info, dict):
+        label = person_info.get("label", "")
+        search_name = person_info.get("search_name", label)
+        parts.append(f"person: {label} (search_name: {search_name})")
+    elif entities.get("person"):
+        parts.append(f"person: {entities['person']}")
+
+    place_info = resolved.get("place")
+    if isinstance(place_info, list) and place_info:
+        labels = [place.get("label", "") for place in place_info[:3] if place.get("label")]
+        if labels:
+            parts.append(f"place: {', '.join(labels)}")
+    elif entities.get("place_mention"):
+        parts.append(f"place: {entities['place_mention']}")
+    elif entities.get("place_type"):
+        parts.append(f"place_type: {entities['place_type']}")
+
+    if entities.get("event_title"):
+        parts.append(f"event_title: {entities['event_title']}")
+    if state.get("target_relation"):
+        parts.append(f"target_relation: {state['target_relation']}")
+
+    return "; ".join(parts) if parts else "없음"
+
+
+def _format_time_info(time_constraint: Optional[Dict[str, Any]]) -> str:
+    if not time_constraint:
+        return "없음"
+    return f"{time_constraint['word']} ({time_constraint['date']} 이후)"

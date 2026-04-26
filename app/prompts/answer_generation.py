@@ -1,37 +1,22 @@
 """
-Answer Generation Prompt Templates
-SPARQL 실행 결과를 자연어로 설명하는 프롬프트
+Answer generation prompt templates.
 """
 
-from typing import List, Dict
+from typing import Any, Dict, List
 
-ANSWER_GENERATION_SYSTEM = """당신은 스마트폰 로그 데이터 분석 전문가입니다.
-SPARQL 쿼리 실행 결과를 사용자에게 자연스럽고 이해하기 쉽게 설명하세요.
-말투는 딱딱한 보고서체가 아니라, 개인 비서가 차분하게 알려주는 듯한 따뜻한 한국어로 작성하세요.
 
-# 답변 원칙
+ANSWER_GENERATION_SYSTEM = """당신은 스마트폰 로그 데이터를 읽어주는 개인 비서입니다.
+SPARQL 실행 결과를 사용자에게 자연스럽고 따뜻한 한국어로 설명하세요.
 
-1. 간결하고 명확하게 설명
-2. 구체적인 정보 포함 (이름, 시간, 장소 등)
-3. 시간은 "04월 21일 10시 35분" 형식으로 표현
-4. 사람 이름, 가장 중요한 날짜/시간, 장소, 핵심 결론은 Markdown bold(`**...**`)로 강조
-5. Link prediction으로 예측된 내용이 있으면 "[예측]" 표시
-6. 제목이나 "답변:" 접두어로 시작하지 말 것
-7. 마지막에는 결과와 자연스럽게 이어지는 짧은 추천 질문을 한 문장으로 덧붙일 것
-8. 근거가 있으면 마지막 또는 마지막 직전에 짧게 명시
-
-# 예시
-
-좋은 답변:
-"**김철수님**과는 **04월 21일 10시 35분**에 통화하셨어요.
-이후 **11시 30분**에는 **스타벅스 역삼점**에 방문한 기록이 있습니다.
-
-근거: call_005, visit_007
-원하시면 이 일정 전후의 통화나 방문 기록도 같이 정리해드릴까요?"
-
-나쁜 답변:
-"CallEvent가 1개 있고 VisitEvent가 1개 있습니다."
+원칙:
+1. 제목이나 "답변:" 같은 접두어로 시작하지 마세요.
+2. 사람 이름, 핵심 시간, 장소, 앱, 결론은 Markdown bold(`**...**`)로 강조하세요.
+3. link prediction으로 보강된 내용은 반드시 문장 앞에 `[예측]`을 붙이고, 관측 fact처럼 단정하지 마세요.
+4. confidence와 근거가 있으면 짧게 함께 설명하세요.
+5. 너무 딱딱한 보고서체 대신 개인 비서가 알려주는 말투로 답하세요.
+6. 마지막에는 사용자가 자연스럽게 이어갈 수 있는 짧은 추천 질문을 한 문장으로 덧붙이세요.
 """
+
 
 ANSWER_GENERATION_USER_TEMPLATE = """# Original Query
 {query}
@@ -44,39 +29,59 @@ ANSWER_GENERATION_USER_TEMPLATE = """# Original Query
 # Query Results
 {results}
 
-# Link Prediction Info (if used)
+# Link Prediction Info
 {link_prediction_info}
 
 # Instructions
-위 결과를 바탕으로 사용자에게 자연스러운 답변을 생성하세요.
-결과가 없으면 "해당 정보를 찾을 수 없습니다"라고 답하세요.
+위 결과를 바탕으로 사용자가 바로 이해할 수 있게 답하세요.
+결과가 없으면 찾지 못했다고 솔직히 말하고, 다음에 확인할 수 있는 방향을 짧게 제안하세요.
 """
 
 
-def format_results_for_prompt(results: List[Dict]) -> str:
-    """SPARQL 결과를 프롬프트용으로 포맷"""
+def format_results_for_prompt(results: List[Dict[str, Any]]) -> str:
+    """Format SPARQL results for the answer prompt."""
     if not results:
         return "결과 없음"
-    
+
     lines = []
     for i, row in enumerate(results, 1):
         lines.append(f"결과 {i}:")
         for key, value in row.items():
             lines.append(f"  - {key}: {value}")
         lines.append("")
-    
+
     return "\n".join(lines)
 
 
-def format_link_prediction_for_prompt(predicted_triples: List[tuple], 
-                                      confidences: List[float]) -> str:
-    """Link prediction 결과를 프롬프트용으로 포맷"""
+def format_link_prediction_for_prompt(
+    predicted_triples: List[tuple],
+    confidences: List[float],
+    prediction_evidence: List[Dict[str, Any]] = None,
+) -> str:
+    """Format request-scoped predicted triples and evidence."""
     if not predicted_triples:
-        return "Link prediction 사용 안 함"
-    
-    lines = ["예측된 관계:"]
-    for triple, conf in zip(predicted_triples, confidences):
-        head, rel, tail = triple
-        lines.append(f"  - ({head}) -[{rel}]-> ({tail}) [신뢰도: {conf:.2f}]")
-    
+        return "사용하지 않음"
+
+    evidence_by_triple = {
+        (item.get("head"), item.get("relation"), item.get("tail")): item
+        for item in (prediction_evidence or [])
+        if isinstance(item, dict)
+    }
+
+    lines = [
+        "아래 관계는 KG에 영구 저장된 fact가 아니라 이번 요청에서만 사용한 예측 관계입니다.",
+        "답변에서는 반드시 `[예측]`으로 표시하세요.",
+    ]
+    for index, triple in enumerate(predicted_triples):
+        head, relation, tail = triple
+        evidence = evidence_by_triple.get((head, relation, tail), {})
+        confidence = evidence.get("confidence")
+        if confidence is None and index < len(confidences):
+            confidence = confidences[index]
+        evidence_text = evidence.get("evidence", "근거 없음")
+        lines.append(
+            f"- ({head}) -[{relation}]-> ({tail}) "
+            f"[confidence: {float(confidence or 0):.2f}] evidence: {evidence_text}"
+        )
+
     return "\n".join(lines)

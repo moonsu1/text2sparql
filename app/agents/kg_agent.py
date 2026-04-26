@@ -83,6 +83,7 @@ class KGAgent:
             "session_id": None,
             "use_link_prediction": use_link_prediction,
             "intent": None,
+            "target_relation": None,
             "entities": {},
             "time_constraint": None,
             "is_sparse": False,
@@ -90,6 +91,7 @@ class KGAgent:
             "sparse_score": 1.0,
             "predicted_triples": [],
             "prediction_confidence": [],
+            "prediction_evidence": [],
             "sparql_query": None,
             "relevant_properties": [],
             "sparql_results": [],
@@ -115,6 +117,8 @@ class KGAgent:
             "workflow_path": final_state.get("workflow_path", []),
             "is_sparse": final_state.get("is_sparse", False),
             "predicted_triples": final_state.get("predicted_triples", []),
+            "prediction_confidence": final_state.get("prediction_confidence", []),
+            "prediction_evidence": final_state.get("prediction_evidence", []),
             "error": final_state.get("error")
         }
         

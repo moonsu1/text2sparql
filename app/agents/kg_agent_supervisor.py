@@ -131,6 +131,7 @@ class KGAgentSupervisor:
 
             # query_analysis 결과 병합
             "intent": initial_result.get("intent"),
+            "target_relation": initial_result.get("target_relation"),
             "entities": initial_result.get("entities", {}),
             "time_constraint": initial_result.get("time_constraint"),
 
@@ -148,6 +149,7 @@ class KGAgentSupervisor:
             "sparse_score": 1.0,
             "predicted_triples": [],
             "prediction_confidence": [],
+            "prediction_evidence": [],
             "sparql_query": None,
             "relevant_properties": [],
             "sparql_results": None,
@@ -173,6 +175,8 @@ class KGAgentSupervisor:
             "supervisor_reasoning_log": final_state.get("supervisor_reasoning_log", []),
             "is_sparse": final_state.get("is_sparse", False),
             "predicted_triples": final_state.get("predicted_triples", []),
+            "prediction_confidence": final_state.get("prediction_confidence", []),
+            "prediction_evidence": final_state.get("prediction_evidence", []),
             "result_verification": final_state.get("result_verification"),
             "error": final_state.get("error"),
         }
@@ -203,6 +207,7 @@ class KGAgentSupervisor:
             "missing_relations",
             "predicted_triples",
             "prediction_confidence",
+            "prediction_evidence",
             "relevant_properties",
             "sources",
             "workflow_path",

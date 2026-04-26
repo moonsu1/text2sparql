@@ -325,6 +325,24 @@ log:relatedEvent rdf:type owl:ObjectProperty ;
     rdfs:domain log:Content ;
     rdfs:range log:Event .
 
+log:visitedAfter rdf:type owl:ObjectProperty ;
+    rdfs:label "visited after"@en, "통화 후 방문"@ko ;
+    rdfs:comment "통화 이후의 시간/장소 근거로 예측한 request-scoped CallEvent-VisitEvent 관계"@ko ;
+    rdfs:domain log:CallEvent ;
+    rdfs:range log:VisitEvent .
+
+log:metDuring rdf:type owl:ObjectProperty ;
+    rdfs:label "met during"@en, "방문 중 만난 사람"@ko ;
+    rdfs:comment "방문 시간 직전의 통화/동시성 근거로 예측한 request-scoped VisitEvent-Person 관계"@ko ;
+    rdfs:domain log:VisitEvent ;
+    rdfs:range log:Person .
+
+log:usedDuring rdf:type owl:ObjectProperty ;
+    rdfs:label "used during"@en, "일정 준비 중 사용"@ko ;
+    rdfs:comment "회의/일정 전후의 시간 근거와 앱 유형으로 예측한 request-scoped AppUsageEvent-CalendarEvent 관계"@ko ;
+    rdfs:domain log:AppUsageEvent ;
+    rdfs:range log:CalendarEvent .
+
 log:contentType rdf:type owl:DatatypeProperty ;
     rdfs:label "content type"@en, "콘텐츠 유형"@ko ;
     rdfs:comment "콘텐츠 유형: photo, video, screenshot"@ko ;
