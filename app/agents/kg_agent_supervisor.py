@@ -127,10 +127,15 @@ class KGAgentSupervisor:
         initial_result: Dict[str, Any],
     ) -> Dict[str, Any]:
         """질의 분석 결과를 LangGraph 초기 state로 변환"""
+        # query_analysis_stage가 target_relation으로 LP 필요성을 판단한 경우 우선 적용
+        effective_link_prediction = (
+            use_link_prediction or initial_result.get("use_link_prediction", False)
+        )
+
         return {
             "query": query,
             "session_id": None,
-            "use_link_prediction": use_link_prediction,
+            "use_link_prediction": effective_link_prediction,
 
             # query_analysis 결과 병합
             "intent": initial_result.get("intent"),

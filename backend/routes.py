@@ -3,6 +3,7 @@ API Routes
 """
 
 import sys
+import threading
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from dotenv import load_dotenv
@@ -22,6 +23,23 @@ _agent = None
 
 # USE_SUPERVISOR_AGENT=true → KGAgentSupervisor 사용 (기본값: true)
 USE_SUPERVISOR = os.getenv("USE_SUPERVISOR_AGENT", "true").lower() == "true"
+
+
+def _start_kg_model_training_background():
+    """GCN+TransE 모델을 백그라운드 스레드에서 학습 (서버 응답 차단 없음)."""
+    def _train():
+        try:
+            from app.link_prediction.kg_model_manager import get_model_manager
+            mgr = get_model_manager()
+            print("[ROUTE] KG 임베딩 모델 백그라운드 학습 시작...", flush=True)
+            mgr.ensure_ready()
+            status = "완료 ✓" if mgr.is_ready else "실패 (rule-based fallback 사용)"
+            print(f"[ROUTE] KG 임베딩 모델 학습 {status}", flush=True)
+        except Exception as e:
+            print(f"[ROUTE] KG 모델 학습 오류 (무시): {e}", flush=True)
+
+    t = threading.Thread(target=_train, daemon=True, name="kg-model-trainer")
+    t.start()
 
 
 def get_agent():
@@ -53,6 +71,9 @@ def get_agent():
             print("[ROUTE] Fuseki 데이터 준비 완료", flush=True)
         except Exception as e:
             print(f"[ROUTE ERROR] Fuseki 데이터 적재 실패: {e}", flush=True)
+
+        # GCN+TransE 모델 백그라운드 학습 (서버 시작을 차단하지 않음)
+        _start_kg_model_training_background()
         
         # Agent 선택 (환경 변수로 결정)
         if USE_SUPERVISOR:

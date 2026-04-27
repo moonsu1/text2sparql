@@ -67,7 +67,16 @@ JSON만 출력하세요:
     analysis = _parse_json_safe(result)
 
     intent = _none_if_null(analysis.get("intent")) or _infer_intent_from_query(query)
-    target_relation = _none_if_null(analysis.get("target_relation")) or _infer_target_relation_from_query(query)
+
+    # LLM이 유효하지 않은 값을 반환할 수 있으므로, 유효한 관계명인지 검증 후 fallback 적용
+    LINK_PREDICTION_RELATIONS = {"visitedAfter", "metDuring", "relatedEvent", "usedDuring"}
+    _llm_relation = _none_if_null(analysis.get("target_relation"))
+    if _llm_relation in LINK_PREDICTION_RELATIONS:
+        target_relation = _llm_relation
+    else:
+        # LLM이 유효하지 않거나 null → rule-based로 확실하게 결정
+        target_relation = _infer_target_relation_from_query(query)
+
     person_mention = _none_if_null(analysis.get("person_mention")) or _extract_person_mention(query)
     place_type = _normalize_place_type(_none_if_null(analysis.get("place_type"))) or _extract_place_type(query)
     place_mention = _none_if_null(analysis.get("place_mention")) or _extract_place_mention(query)
@@ -89,12 +98,11 @@ JSON만 출력하세요:
     time_constraint = _build_time_constraint(_none_if_null(analysis.get("time_constraint")))
 
     print(f"  Intent: {intent}")
-    print(f"  Target relation: {target_relation}")
+    print(f"  Target relation: {target_relation} (LLM={_llm_relation!r})")
     print(f"  Entities: {entities}")
     print(f"  Time: {time_constraint}")
 
-    # target_relation이 있으면 LP 후보로 표시 (실제 트리거는 SPARQL 결과 0건일 때)
-    LINK_PREDICTION_RELATIONS = {"visitedAfter", "metDuring", "relatedEvent", "usedDuring"}
+    # target_relation이 있으면 LP 후보로 표시 (실제 트리거는 SPARQL 결과 0건 or sparse일 때)
     use_link_prediction = target_relation in LINK_PREDICTION_RELATIONS if target_relation else False
 
     if use_link_prediction:

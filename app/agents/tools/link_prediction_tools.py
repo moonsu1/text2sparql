@@ -30,28 +30,270 @@ RELATION_URIS = {
 
 
 def predict_sparse_relations(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Dispatch to the relation completion predictor selected for this query."""
+    """
+    희박 관계 예측. 순서:
+      1. GCN+TransE 임베딩 모델 시도
+      2. 예측 없으면 rule-based fallback
+    """
     relation = state.get("target_relation") or infer_target_relation(state)
-    predictor = RELATION_COMPLETION_REGISTRY.get(relation)
 
+    # ── 1. 임베딩 모델 시도 ─────────────────────────────────────────────
+    embed_predictions = _predict_with_embedding_model(state, relation)
+    if embed_predictions:
+        print(f"  [LP] 임베딩 모델 예측 {len(embed_predictions)}건 (relation={relation})")
+        return {"target_relation": relation, "predictions": embed_predictions[:1]}
+
+    # ── 2. Rule-based fallback ──────────────────────────────────────────
+    print(f"  [LP] 임베딩 예측 없음 → rule-based fallback (relation={relation})")
+    predictor = RELATION_COMPLETION_REGISTRY.get(relation)
     if not predictor:
         return {"target_relation": relation, "predictions": []}
 
     predictions = predictor(state)
     predictions = [
-        prediction
-        for prediction in sorted(
+        p
+        for p in sorted(
             predictions,
             key=lambda item: (item.get("confidence", 0.0), _prediction_rank_time(item)),
             reverse=True,
         )
-        if prediction.get("confidence", 0.0) >= CONFIDENCE_THRESHOLD
+        if p.get("confidence", 0.0) >= CONFIDENCE_THRESHOLD
     ]
 
-    return {
-        "target_relation": relation,
-        "predictions": predictions[:1],
-    }
+    return {"target_relation": relation, "predictions": predictions[:1]}
+
+
+# ── 임베딩 모델 예측 ────────────────────────────────────────────────────────
+
+def _predict_with_embedding_model(
+    state: Dict[str, Any], relation: Optional[str]
+) -> List[Dict[str, Any]]:
+    """
+    GCN+TransE 모델로 (head, relation, ?) 예측.
+    head 엔티티 목록은 Fuseki에서 조회.
+    """
+    if not relation:
+        return []
+
+    try:
+        from app.link_prediction.kg_model_manager import get_model_manager
+        mgr = get_model_manager()
+        if not mgr.is_ready:
+            print("  [LP-embed] 모델 미준비 → skip")
+            return []
+    except Exception as e:
+        print(f"  [LP-embed] 모델 로드 실패: {e}")
+        return []
+
+    # 관계별 head 엔티티 조회 + 예측 수행
+    if relation == "visitedAfter":
+        return _embed_visited_after(state, mgr)
+    if relation == "metDuring":
+        return _embed_met_during(state, mgr)
+    if relation == "relatedEvent":
+        return _embed_related_event(state, mgr)
+    if relation == "usedDuring":
+        return _embed_used_during(state, mgr)
+
+    return []
+
+
+def _embed_visited_after(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
+    """CallEvent → (visitedAfter) → VisitEvent 임베딩 예측."""
+    person_name = _person_search_name(state)
+    person_filter = _contains_filter("?personLabel", person_name) if person_name else ""
+
+    head_rows = _execute_select(f"""
+        PREFIX log: <{LOG}>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        SELECT ?call ?callTime ?personLabel WHERE {{
+          ?call a log:CallEvent ;
+                log:callee ?person ;
+                log:startedAt ?callTime .
+          ?person rdfs:label ?personLabel .
+          {person_filter}
+        }}
+    """)
+
+    results = []
+    for row in head_rows:
+        call_uri = row.get("call", "")
+        if not call_uri:
+            continue
+
+        preds = mgr.predict(call_uri, "visitedAfter", top_k=3, node_type_filter="visit")
+        for tail_uri, confidence in preds:
+            # tail의 실제 정보 조회
+            detail = _fetch_visit_detail(tail_uri)
+            if not detail:
+                continue
+            results.append(_build_evidence(
+                row={"call": call_uri, "visit": tail_uri,
+                     "callTime": row.get("callTime"), **detail},
+                relation="visitedAfter",
+                confidence=confidence,
+                minutes=0,
+                evidence=f"GCN+TransE 임베딩 예측 (신뢰도 {confidence:.2f})",
+                head_key="call", tail_key="visit",
+                head_label=row.get("personLabel"),
+                tail_label=detail.get("placeLabel"),
+                timestamps={"callTime": row.get("callTime"),
+                            "visitTime": detail.get("visitTime")},
+            ))
+
+    return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)
+
+
+def _embed_met_during(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
+    """VisitEvent → (metDuring) → Person 임베딩 예측."""
+    place_keyword = _place_keyword(state)
+    place_filter = _contains_filter("?placeLabel", place_keyword) if place_keyword else ""
+
+    head_rows = _execute_select(f"""
+        PREFIX log: <{LOG}>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        SELECT ?visit ?visitTime ?placeLabel WHERE {{
+          ?visit a log:VisitEvent ;
+                 log:visitedAt ?visitTime ;
+                 log:place ?place .
+          ?place rdfs:label ?placeLabel .
+          {place_filter}
+        }}
+    """)
+
+    results = []
+    for row in head_rows:
+        visit_uri = row.get("visit", "")
+        if not visit_uri:
+            continue
+        preds = mgr.predict(visit_uri, "metDuring", top_k=3, node_type_filter="person")
+        for tail_uri, confidence in preds:
+            detail = _fetch_person_detail(tail_uri)
+            if not detail:
+                continue
+            results.append(_build_evidence(
+                row={"visit": visit_uri, "person": tail_uri, **row, **detail},
+                relation="metDuring",
+                confidence=confidence,
+                minutes=0,
+                evidence=f"GCN+TransE 임베딩 예측 (신뢰도 {confidence:.2f})",
+                head_key="visit", tail_key="person",
+                head_label=row.get("placeLabel"),
+                tail_label=detail.get("personLabel"),
+                timestamps={"visitTime": row.get("visitTime")},
+            ))
+    return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)
+
+
+def _embed_related_event(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
+    """Content → (relatedEvent) → VisitEvent 임베딩 예측."""
+    head_rows = _execute_select(f"""
+        PREFIX log: <{LOG}>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        SELECT ?content ?contentLabel ?capturedAt WHERE {{
+          ?content a log:Content ;
+                   rdfs:label ?contentLabel ;
+                   log:capturedAt ?capturedAt .
+        }}
+    """)
+
+    results = []
+    for row in head_rows:
+        content_uri = row.get("content", "")
+        if not content_uri:
+            continue
+        preds = mgr.predict(content_uri, "relatedEvent", top_k=3, node_type_filter="visit")
+        for tail_uri, confidence in preds:
+            detail = _fetch_visit_detail(tail_uri)
+            if not detail:
+                continue
+            results.append(_build_evidence(
+                row={"content": content_uri, "visit": tail_uri, **row, **detail},
+                relation="relatedEvent",
+                confidence=confidence,
+                minutes=0,
+                evidence=f"GCN+TransE 임베딩 예측 (신뢰도 {confidence:.2f})",
+                head_key="content", tail_key="visit",
+                head_label=row.get("contentLabel"),
+                tail_label=detail.get("placeLabel"),
+                timestamps={"capturedAt": row.get("capturedAt"),
+                            "visitTime": detail.get("visitTime")},
+            ))
+    return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)
+
+
+def _embed_used_during(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
+    """AppUsageEvent → (usedDuring) → CalendarEvent 임베딩 예측."""
+    head_rows = _execute_select(f"""
+        PREFIX log: <{LOG}>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        SELECT ?appEvent ?appTime ?appLabel WHERE {{
+          ?appEvent a log:AppUsageEvent ;
+                    log:occurredAt ?appTime ;
+                    log:usedApp ?app .
+          ?app rdfs:label ?appLabel .
+        }}
+    """)
+
+    results = []
+    for row in head_rows:
+        app_uri = row.get("appEvent", "")
+        if not app_uri:
+            continue
+        preds = mgr.predict(app_uri, "usedDuring", top_k=3, node_type_filter="calendar")
+        for tail_uri, confidence in preds:
+            detail = _fetch_calendar_detail(tail_uri)
+            if not detail:
+                continue
+            results.append(_build_evidence(
+                row={"appEvent": app_uri, "calendar": tail_uri, **row, **detail},
+                relation="usedDuring",
+                confidence=confidence,
+                minutes=0,
+                evidence=f"GCN+TransE 임베딩 예측 (신뢰도 {confidence:.2f})",
+                head_key="appEvent", tail_key="calendar",
+                head_label=row.get("appLabel"),
+                tail_label=detail.get("title"),
+                timestamps={"appTime": row.get("appTime"),
+                            "startTime": detail.get("startTime")},
+            ))
+    return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)
+
+
+# ── Fuseki 상세 조회 헬퍼 ────────────────────────────────────────────────────
+
+def _fetch_visit_detail(visit_uri: str) -> Optional[Dict[str, Any]]:
+    rows = _execute_select(f"""
+        PREFIX log: <{LOG}>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        SELECT ?visitTime ?placeLabel WHERE {{
+          <{visit_uri}> log:visitedAt ?visitTime ;
+                        log:place ?place .
+          ?place rdfs:label ?placeLabel .
+        }}
+    """)
+    return rows[0] if rows else None
+
+
+def _fetch_person_detail(person_uri: str) -> Optional[Dict[str, Any]]:
+    rows = _execute_select(f"""
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+        SELECT ?personLabel WHERE {{
+          <{person_uri}> rdfs:label ?personLabel .
+        }}
+    """)
+    return rows[0] if rows else None
+
+
+def _fetch_calendar_detail(cal_uri: str) -> Optional[Dict[str, Any]]:
+    rows = _execute_select(f"""
+        PREFIX log: <{LOG}>
+        SELECT ?title ?startTime WHERE {{
+          <{cal_uri}> log:title ?title ;
+                      log:startTime ?startTime .
+        }}
+    """)
+    return rows[0] if rows else None
 
 
 def infer_target_relation(state: Dict[str, Any]) -> Optional[str]:

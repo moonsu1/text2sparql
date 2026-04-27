@@ -4,7 +4,6 @@ RDF Graph → PyTorch Geometric Data 변환
 
 from typing import Dict, Tuple, List
 import torch
-from torch_geometric.data import Data
 from rdflib import Graph
 
 
@@ -17,7 +16,7 @@ class RDFGraphBuilder:
         self.rel_to_idx: Dict[str, int] = {}
         self.idx_to_rel: Dict[int, str] = {}
     
-    def build_from_rdf(self, rdf_graph: Graph) -> Data:
+    def build_from_rdf(self, rdf_graph: Graph):  # -> torch_geometric.data.Data
         """
         RDF Graph를 PyG Data로 변환
         
@@ -63,25 +62,26 @@ class RDFGraphBuilder:
                 edge_list.append([src_idx, dst_idx])
                 edge_types.append(rel_idx)
         
-        # PyG Data 생성
+        # PyG Data 생성 (lazy import으로 circular import 방지)
+        from torch_geometric.data import Data
+
         if not edge_list:
-            # Empty graph
             return Data(
                 edge_index=torch.zeros((2, 0), dtype=torch.long),
                 edge_type=torch.zeros(0, dtype=torch.long),
-                num_nodes=0
+                num_nodes=0,
             )
-        
+
         edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
         edge_type = torch.tensor(edge_types, dtype=torch.long)
-        
+
         return Data(
             edge_index=edge_index,
             edge_type=edge_type,
-            num_nodes=len(self.node_to_idx)
+            num_nodes=len(self.node_to_idx),
         )
     
-    def get_triples(self, data: Data) -> List[Tuple[int, int, int]]:
+    def get_triples(self, data) -> List[Tuple[int, int, int]]:
         """PyG Data에서 (head, relation, tail) triples 추출"""
         triples = []
         for i in range(data.edge_index.size(1)):
