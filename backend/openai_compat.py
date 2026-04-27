@@ -108,6 +108,14 @@ STAGE_LABELS = {
     "answer": "최종 답변",
 }
 
+STAGE_PROGRESS_TEXT = {
+    "query_analysis": "_질의를 분석하는 중입니다..._\n\n",
+    "entity_resolution": "_엔티티를 확인하는 중입니다..._\n\n",
+    "sparql_generation": "_SPARQL을 생성하는 중입니다..._\n\n",
+    "execution": "_쿼리를 실행하는 중입니다..._\n\n",
+    "link_prediction": "_누락된 관계를 예측하는 중입니다..._\n\n",
+}
+
 
 def _request_use_link_prediction(request: ChatCompletionRequest) -> bool:
     """OpenWebUI does not send this field, so default to enabled."""
@@ -127,6 +135,19 @@ async def _send_chunk(text: str, chat_id: str, model: str) -> str:
 async def _stream_text(text: str, chat_id: str, model: str, delay: float = 0.008):
     for char in text:
         yield await _send_chunk(char, chat_id, model)
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+
+async def _stream_chunked_text(
+    text: str,
+    chat_id: str,
+    model: str,
+    chunk_size: int = 12,
+    delay: float = 0.002,
+):
+    for index in range(0, len(text), chunk_size):
+        yield await _send_chunk(text[index:index + chunk_size], chat_id, model)
         if delay > 0:
             await asyncio.sleep(delay)
 
@@ -229,8 +250,15 @@ def format_agent_event_for_markdown(event: Dict[str, Any], supervisor_index: int
     stage = event.get("stage")
     state = event.get("state") or {}
 
+    if event_type == "answer_token":
+        return event.get("delta", "")
+
     if event_type == "stage_start":
-        return "**질의 분석**\n" if stage == "query_analysis" else ""
+        if stage == "query_analysis":
+            return "**질의 분석**\n" + STAGE_PROGRESS_TEXT["query_analysis"]
+        if stage == "answer":
+            return "## 최종 답변\n\n"
+        return STAGE_PROGRESS_TEXT.get(stage, "")
 
     if event_type == "supervisor_decision":
         _, body = _split_supervisor_reasoning(event.get("reasoning", ""), supervisor_index)
@@ -269,6 +297,8 @@ def format_agent_event_for_markdown(event: Dict[str, Any], supervisor_index: int
             return _format_prediction_summary(state)
 
         if stage == "answer":
+            if state.get("answer_streamed"):
+                return ""
             answer = state.get("answer") or "답변을 생성하지 못했습니다."
             return f"## 최종 답변\n\n{answer}\n"
 
@@ -304,7 +334,7 @@ async def stream_live_agent_response(
                 supervisor_index += 1
             text = format_agent_event_for_markdown(event, supervisor_index)
             if text:
-                async for chunk in _stream_block(text, chat_id, model, delay=0):
+                async for chunk in _stream_chunked_text(text, chat_id, model):
                     yield chunk
     except Exception as e:
         async for chunk in _stream_block(f"\n\n오류가 발생했습니다: `{str(e)}`\n", chat_id, model, delay=0):

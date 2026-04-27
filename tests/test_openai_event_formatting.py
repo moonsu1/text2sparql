@@ -95,3 +95,38 @@ def test_interleaved_stream_does_not_duplicate_sparql_or_answer():
     assert text.count("## 최종 답변") == 1
     assert text.count("SELECT ?s WHERE") == 1
     assert text.count("최종 답변입니다.") == 1
+
+
+def test_streaming_answer_tokens_render_without_duplicate_answer():
+    text = _render_events([
+        {
+            "type": "supervisor_decision",
+            "stage": "supervisor",
+            "next_stage": "answer",
+            "reasoning": "**[1단계]** 최종 답변을 생성합니다.",
+        },
+        {"type": "stage_start", "stage": "answer"},
+        {"type": "answer_token", "stage": "answer", "delta": "안녕하세요"},
+        {"type": "answer_token", "stage": "answer", "delta": "!"},
+        {
+            "type": "stage_complete",
+            "stage": "answer",
+            "state": {
+                "answer": "안녕하세요!",
+                "answer_streamed": True,
+            },
+        },
+        {"type": "final", "stage": "END", "result": {"answer": "안녕하세요!"}},
+    ])
+
+    assert text.count("## 최종 답변") == 1
+    assert text.count("안녕하세요!") == 1
+    assert text.endswith("안녕하세요!")
+
+
+def test_stage_start_outputs_progress_line():
+    text = _render_events([
+        {"type": "stage_start", "stage": "sparql_generation"},
+    ])
+
+    assert "SPARQL을 생성하는 중입니다" in text

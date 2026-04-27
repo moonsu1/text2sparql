@@ -235,6 +235,27 @@ def answer_generation_stage(state: AgentState) -> Dict[str, Any]:
     """Generate the final user-facing answer."""
     print("\n[STAGE] Answer Generation")
 
+    system_prompt, user_prompt = build_answer_generation_prompt(state)
+
+    answer = call_llm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.5,
+    )
+
+    sources = collect_answer_sources(state.get("sparql_results") or [])
+
+    print(f"  Answer generated ({len(answer)} chars)")
+
+    return {
+        "answer": answer,
+        "sources": sources,
+        "workflow_path": ["answer_generation"],
+    }
+
+
+def build_answer_generation_prompt(state: AgentState) -> tuple[str, str]:
+    """Build the exact prompt used by the final answer stage."""
     from app.prompts.answer_generation import (
         ANSWER_GENERATION_SYSTEM,
         ANSWER_GENERATION_USER_TEMPLATE,
@@ -256,27 +277,19 @@ def answer_generation_stage(state: AgentState) -> Dict[str, Any]:
         link_prediction_info=link_pred_info,
     )
 
-    answer = call_llm(
-        system_prompt=ANSWER_GENERATION_SYSTEM,
-        user_prompt=user_prompt,
-        temperature=0.5,
-    )
+    return ANSWER_GENERATION_SYSTEM, user_prompt
 
+
+def collect_answer_sources(results: list[Dict[str, Any]]) -> list[str]:
+    """Collect compact source ids from SPARQL result values."""
     sources = []
-    for result in state.get("sparql_results") or []:
+    for result in results:
         for value in result.values():
             if "data/" in str(value):
                 event_id = str(value).split("/")[-1]
                 if event_id not in sources:
                     sources.append(event_id)
-
-    print(f"  Answer generated ({len(answer)} chars)")
-
-    return {
-        "answer": answer,
-        "sources": sources,
-        "workflow_path": ["answer_generation"],
-    }
+    return sources
 
 
 def _parse_json_safe(text: str) -> Dict[str, Any]:

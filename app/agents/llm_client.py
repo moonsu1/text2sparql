@@ -6,6 +6,7 @@ ai_daily_briefing 구조를 참고하여 구현
 import os
 import time
 import re
+from typing import Iterator
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -68,6 +69,41 @@ def _gemini_generate_with_key(api_key: str, full_prompt: str, temperature: float
         },
     )
     return response.text
+
+
+def _extract_stream_chunk_text(chunk) -> str:
+    """Gemini streaming chunk에서 안전하게 텍스트 delta를 추출."""
+    try:
+        return chunk.text or ""
+    except Exception:
+        return ""
+
+
+def _gemini_generate_stream_with_key(
+    api_key: str,
+    full_prompt: str,
+    temperature: float,
+) -> Iterator[str]:
+    """지정한 API 키로 Gemini streaming 호출."""
+    import google.generativeai as genai
+
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
+
+    response = model.generate_content(
+        full_prompt,
+        generation_config={
+            "temperature": temperature,
+            "max_output_tokens": 4096,
+        },
+        stream=True,
+    )
+
+    for chunk in response:
+        text = _extract_stream_chunk_text(chunk)
+        if text:
+            yield text
 
 
 def _is_quota_error(err_str: str) -> bool:
@@ -165,3 +201,102 @@ def call_llm(
     
     print(f"  [llm] Gemini 최종 실패 (모든 재시도 소진)")
     return "[ERROR] LLM 호출 실패 - 재시도 초과"
+
+
+def call_llm_stream(
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = None,
+    max_retries: int = None,
+) -> Iterator[str]:
+    """
+    Gemini API streaming 호출.
+
+    첫 토큰을 보내기 전 실패하면 기존 blocking 호출로 fallback한다. 일부 토큰이
+    이미 전송된 뒤 실패하면 SSE 연결이 끊기지 않도록 짧은 오류 문구를 이어 보낸다.
+    """
+    if temperature is None:
+        temperature = float(os.getenv("LLM_TEMPERATURE", "0.3"))
+
+    if max_retries is None:
+        max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
+
+    global _gemini_key_index
+    keys = _get_gemini_keys()
+
+    if not keys:
+        yield "[ERROR] GEMINI_API_KEYS를 .env에 설정해주세요"
+        return
+
+    full_prompt = f"{system_prompt}\n\n{user_prompt}"
+    n_keys = len(keys)
+    available_keys = [i for i in range(n_keys) if not _is_key_exhausted(i)]
+
+    if not available_keys:
+        print("  [llm] 모든 키 소진, 10초 대기 후 재시도...")
+        time.sleep(10)
+        _exhausted_keys.clear()
+        available_keys = list(range(n_keys))
+
+    start_index = _gemini_key_index
+    yielded_any = False
+
+    for _ in range(len(available_keys)):
+        attempts = 0
+        while attempts < n_keys:
+            current_index = (start_index + attempts) % n_keys
+            if not _is_key_exhausted(current_index):
+                break
+            attempts += 1
+        else:
+            print("  [llm] 모든 키 소진, 10초 대기...")
+            time.sleep(10)
+            _exhausted_keys.clear()
+            current_index = start_index % n_keys
+
+        api_key = keys[current_index]
+        key_num = current_index + 1
+
+        try:
+            for delta in _gemini_generate_stream_with_key(api_key, full_prompt, temperature):
+                if not delta:
+                    continue
+                yielded_any = True
+                yield delta
+
+            if yielded_any:
+                _gemini_key_index = (current_index + 1) % n_keys
+                if current_index != start_index % n_keys:
+                    print(f"  [llm] ✅ 키 #{key_num} streaming 성공")
+                return
+
+            print(f"  [llm] Gemini streaming 빈 응답 (키 #{key_num})")
+            break
+
+        except Exception as e:
+            err_str = str(e)
+
+            if yielded_any:
+                print(f"  [llm] Gemini streaming 중단 (키 #{key_num}): {err_str[:100]}")
+                yield "\n\n[ERROR] 답변 생성 중 스트리밍이 중단되었습니다."
+                return
+
+            if _is_quota_error(err_str):
+                _mark_key_exhausted(current_index)
+                start_index = current_index + 1
+                time.sleep(0.2)
+                continue
+
+            print(f"  [llm] Gemini streaming 실패 (키 #{key_num}): {err_str[:100]}")
+            time.sleep(2)
+
+    if yielded_any:
+        return
+
+    print("  [llm] Gemini streaming 실패, blocking 호출로 fallback")
+    yield call_llm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+        max_retries=max_retries,
+    )

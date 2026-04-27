@@ -17,6 +17,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from langgraph.graph import StateGraph, END
 
+from app.agents.llm_client import call_llm_stream
 from app.agents.state import AgentState
 from app.agents.supervisor import supervisor_decide, format_reasoning_for_display, MAX_TOTAL_ITERATIONS
 from app.agents.stages import (
@@ -26,6 +27,8 @@ from app.agents.stages import (
     execution_stage,
     link_prediction_stage,
     answer_generation_stage,
+    build_answer_generation_prompt,
+    collect_answer_sources,
 )
 
 
@@ -307,6 +310,58 @@ class KGAgentSupervisor:
                                     "state": final_state,
                                 },
                             )
+
+                            if next_stage == "answer":
+                                system_prompt, user_prompt = build_answer_generation_prompt(final_state)
+                                answer_parts: List[str] = []
+
+                                for delta in call_llm_stream(
+                                    system_prompt=system_prompt,
+                                    user_prompt=user_prompt,
+                                    temperature=0.5,
+                                ):
+                                    if not delta:
+                                        continue
+                                    answer_parts.append(delta)
+                                    yield self._emit_event(
+                                        execution_events,
+                                        {
+                                            "type": "answer_token",
+                                            "stage": "answer",
+                                            "delta": delta,
+                                        },
+                                    )
+
+                                answer = "".join(answer_parts).strip()
+                                answer_update = {
+                                    "answer": answer or "답변을 생성하지 못했습니다.",
+                                    "sources": collect_answer_sources(final_state.get("sparql_results") or []),
+                                    "workflow_path": ["answer_generation"],
+                                    "answer_streamed": True,
+                                }
+                                final_state = self._merge_state_update(final_state, answer_update)
+
+                                yield self._emit_event(
+                                    execution_events,
+                                    {
+                                        "type": "stage_complete",
+                                        "stage": "answer",
+                                        "state": final_state,
+                                    },
+                                )
+
+                                result = self._build_result(query, final_state)
+                                result["execution_events"] = list(execution_events)
+                                yield self._emit_event(
+                                    execution_events,
+                                    {
+                                        "type": "final",
+                                        "stage": "END",
+                                        "result": result,
+                                        "state": final_state,
+                                    },
+                                )
+                                return
                     else:
                         yield self._emit_event(
                             execution_events,
