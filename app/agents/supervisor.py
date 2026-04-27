@@ -86,13 +86,19 @@ def supervisor_decide(state: Dict[str, Any]) -> Tuple[str, str]:
             if link_prediction_done and sparql_retry_count < MAX_SPARQL_RETRY:
                 return (
                     "sparql_generation",
-                    "링크 예측으로 관계를 보강했습니다. 보강된 관계를 반영해 `SPARQL 쿼리를 재생성`합니다.",
+                    "링크 예측 결과를 바탕으로 `SPARQL 쿼리를 생성`합니다.",
                 )
 
         if count > 0:
-            reasoning = f"쿼리 결과 {count}건을 확인했습니다. 다음은 `최종 답변을 생성`합니다."
+            if link_prediction_done:
+                reasoning = f"링크 예측 기반 쿼리 결과 {count}건을 확인했습니다. 다음은 `최종 답변을 생성`합니다."
+            else:
+                reasoning = f"쿼리 결과 {count}건을 확인했습니다. 다음은 `최종 답변을 생성`합니다."
         else:
-            reasoning = "쿼리 결과가 없습니다. 현재까지의 정보를 바탕으로 `최종 답변을 생성`합니다."
+            if link_prediction_done:
+                reasoning = "링크 예측 결과도 없습니다. 현재까지의 정보를 바탕으로 `최종 답변을 생성`합니다."
+            else:
+                reasoning = "쿼리 결과가 없습니다. 현재까지의 정보를 바탕으로 `최종 답변을 생성`합니다."
         return ("answer", reasoning)
 
     return ("answer", "모든 단계가 완료되었습니다. `최종 답변을 생성`합니다.")

@@ -70,6 +70,7 @@ def generate_sparql(
 
     sparql_query = _extract_sparql(sparql_result)
     sparql_query = _fix_label_search(sparql_query)
+    sparql_query = _fix_filter_in_optional(sparql_query)
 
     print(f"  [SPARQLTool] SPARQL generated ({len(sparql_query)} chars)")
     return sparql_query
@@ -242,6 +243,43 @@ def _extract_sparql(llm_output: str) -> str:
         return prefix_match.group(1).strip()
 
     return llm_output.strip()
+
+
+def _fix_filter_in_optional(sparql: str) -> str:
+    """
+    OPTIONAL 블록 안에 FILTER가 있으면 해당 OPTIONAL 전체를 필수 패턴으로 변환합니다.
+
+    Qwen 등 소형 모델이 자주 저지르는 패턴:
+        OPTIONAL {
+            ?x prop ?y .
+            FILTER(?y > ?z)   ← FILTER가 있으면 이 블록은 필수 조건이어야 함
+        }
+
+    수정 결과 (OPTIONAL 제거 → 필수 패턴):
+        ?x prop ?y .
+        FILTER(?y > ?z)
+
+    FILTER가 없는 OPTIONAL은 그대로 유지합니다.
+    """
+    filter_re = re.compile(r'FILTER\s*\(', re.IGNORECASE)
+    optional_re = re.compile(r'OPTIONAL\s*\{([^{}]*)\}', re.DOTALL | re.IGNORECASE)
+    fixed = False
+
+    def replace_optional(m: re.Match) -> str:
+        nonlocal fixed
+        inner = m.group(1)
+        if filter_re.search(inner):
+            # FILTER가 있는 OPTIONAL → OPTIONAL 래퍼 제거, 내용만 남김
+            fixed = True
+            return inner.strip()
+        return m.group(0)
+
+    result = optional_re.sub(replace_optional, sparql)
+
+    if fixed:
+        print("  [SPARQLTool] FILTER-in-OPTIONAL 패턴 감지 → OPTIONAL 제거, 필수 패턴으로 변환 완료")
+
+    return result
 
 
 def _fix_label_search(sparql: str) -> str:

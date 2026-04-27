@@ -29,11 +29,19 @@ def get_agent():
     global _agent
     if _agent is None:
         # 환경 변수 확인
+        provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
         api_keys = os.getenv("GEMINI_API_KEYS", "")
-        model = os.getenv("GEMINI_MODEL", "")
+        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
         fuseki_url = os.getenv("FUSEKI_URL", FUSEKI_URL)
-        print(f"[ROUTE] GEMINI_API_KEYS: {api_keys[:30] if api_keys else 'EMPTY'}...", flush=True)
-        print(f"[ROUTE] GEMINI_MODEL: {model}", flush=True)
+        print(f"[ROUTE] LLM_PROVIDER: {provider}", flush=True)
+        if provider in ("ollama", "qwen", "local"):
+            print(f"[ROUTE] OLLAMA_BASE_URL: {ollama_url}", flush=True)
+            print(f"[ROUTE] OLLAMA_MODEL: {ollama_model}", flush=True)
+        else:
+            print(f"[ROUTE] GEMINI_MODEL: {model}", flush=True)
+            print(f"[ROUTE] GEMINI_API_KEYS: {api_keys[:30] if api_keys else 'EMPTY'}...", flush=True)
         print(f"[ROUTE] FUSEKI_URL: {fuseki_url}", flush=True)
         print(f"[ROUTE] USE_SUPERVISOR_AGENT: {USE_SUPERVISOR}", flush=True)
         

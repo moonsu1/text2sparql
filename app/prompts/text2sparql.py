@@ -41,6 +41,31 @@ PREFIX prov: <http://www.w3.org/ns/prov#>
 2. **ALWAYS use `rdfs:label`** for ALL entity names (Person, Place, App, etc.)
 3. Person names are in ENGLISH (e.g., "Kim Chul-su", "Choi Dae-han")
 4. For Korean names, use: `?person rdfs:label ?name . FILTER(CONTAINS(?name, "Kim Chul"))`
+5. **FILTER must ALWAYS be placed OUTSIDE of OPTIONAL blocks** - FILTER inside OPTIONAL does NOT filter rows!
+6. **OPTIONAL is ONLY for nullable/supplementary columns** - Never put filtering conditions inside OPTIONAL
+
+# ❌ FATAL MISTAKE: FILTER inside OPTIONAL
+
+This is a common mistake that returns WRONG results (all rows pass the filter):
+
+```sparql
+OPTIONAL {{
+    ?call log:startedAt ?callTime .
+    FILTER(?visitTime > ?callTime)   ← WRONG! This does NOT filter rows!
+}}
+```
+
+# ✅ CORRECT: FILTER outside OPTIONAL
+
+```sparql
+?call log:startedAt ?callTime .
+FILTER(?visitTime > ?callTime)       ← CORRECT! This properly filters rows.
+OPTIONAL {{ ?call log:durationSeconds ?dur }}
+```
+
+# OPTIONAL Usage Rule
+- ✅ Use OPTIONAL for: supplementary data that may not exist (e.g., optional duration, optional notes)
+- ❌ Never use OPTIONAL for: conditions that must be satisfied (temporal ordering, category filters)
 
 # Example: Person Name Query
 
@@ -55,7 +80,7 @@ PREFIX prov: <http://www.w3.org/ns/prov#>
 FILTER(CONTAINS(?name, "Kim Chul"))
 ```
 
-# Complete Example
+# Complete Example 1
 
 **Query: "김철수랑 언제 통화했어"**
 ```sparql
@@ -75,14 +100,47 @@ WHERE {{
 ORDER BY DESC(?startedAt)
 ```
 
+# Complete Example 2
+
+**Query: "Jung Su-jin이랑 통화하고 나서 들른 카페 어디야"**
+
+⚠️ "통화 후 방문" 쿼리에서 CRITICAL: **반드시 3시간(180분) 이내 시간 범위 필터를 추가하세요**.
+FILTER 없이 쓰면 "통화 이후 모든 방문"이 반환되어 의미 없는 결과가 나옵니다.
+
+```sparql
+PREFIX log: <http://example.org/smartphone-log#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT DISTINCT ?callTime ?visitTime ?placeName
+WHERE {{
+  ?call a log:CallEvent .
+  ?call log:callee ?person .
+  ?person rdfs:label ?name .
+  FILTER(CONTAINS(?name, "Jung Su-jin"))
+  ?call log:startedAt ?callTime .
+
+  ?visit a log:VisitEvent .
+  ?visit log:visitedAt ?visitTime .
+  FILTER(?visitTime > ?callTime)
+  FILTER(?visitTime < ?callTime + "PT3H"^^xsd:duration)
+
+  ?visit log:place ?place .
+  ?place rdfs:label ?placeName .
+  ?place a log:Cafe .
+}}
+ORDER BY ?callTime ?visitTime
+```
+
 # Instructions
 
 1. 사용자 질문을 분석하여 필요한 Classes와 Properties를 파악하세요
 2. **사람/장소/앱 이름은 반드시 rdfs:label 사용 (log:label 절대 사용 금지!)**
 3. 한글 이름 검색 시 CONTAINS 또는 REGEX 사용
-4. 시간 제약 조건이 있으면 FILTER로 표현하세요
-5. 정렬이 필요하면 ORDER BY를 사용하세요
-6. SPARQL 쿼리만 출력하세요 (설명 없이)
+4. **시간 순서/조건 FILTER는 반드시 OPTIONAL 외부에 배치하세요**
+5. OPTIONAL은 보조 데이터(있을 수도 없을 수도 있는 것)에만 사용하세요
+6. 정렬이 필요하면 ORDER BY를 사용하세요
+7. SPARQL 쿼리만 출력하세요 (설명 없이)
 
 # Output Format
 

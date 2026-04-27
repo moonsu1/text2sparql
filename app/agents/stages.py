@@ -93,6 +93,13 @@ JSON만 출력하세요:
     print(f"  Entities: {entities}")
     print(f"  Time: {time_constraint}")
 
+    # target_relation이 있으면 LP 후보로 표시 (실제 트리거는 SPARQL 결과 0건일 때)
+    LINK_PREDICTION_RELATIONS = {"visitedAfter", "metDuring", "relatedEvent", "usedDuring"}
+    use_link_prediction = target_relation in LINK_PREDICTION_RELATIONS if target_relation else False
+
+    if use_link_prediction:
+        print(f"  [Analysis] target_relation={target_relation} → SPARQL 실행 후 결과 없으면 LP 대기")
+
     return {
         "intent": intent,
         "target_relation": target_relation,
@@ -103,6 +110,7 @@ JSON만 출력하세요:
         "sparql_results": None,
         "link_prediction_done": False,
         "sparql_retry_count": 0,
+        "use_link_prediction": use_link_prediction,
     }
 
 
