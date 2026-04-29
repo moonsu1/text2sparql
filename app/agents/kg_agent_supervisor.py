@@ -159,6 +159,7 @@ class KGAgentSupervisor:
             "prediction_confidence": [],
             "prediction_evidence": [],
             "sparql_query": None,
+            "mermaid_graph": None,
             "relevant_properties": [],
             "sparql_results": None,
             "execution_time_ms": 0.0,

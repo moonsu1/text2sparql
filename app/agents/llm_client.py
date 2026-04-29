@@ -38,7 +38,12 @@ def _get_ollama_model() -> str:
 
 
 def _get_ollama_num_predict() -> int:
-    return int(os.getenv("OLLAMA_NUM_PREDICT", "4096"))
+    return int(os.getenv("OLLAMA_NUM_PREDICT", "1024"))
+
+
+def _get_ollama_num_ctx() -> int:
+    """컨텍스트 창 크기. 기본 8192 (프롬프트 + 생성 합산)."""
+    return int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -57,6 +62,8 @@ def _call_ollama(system_prompt: str, user_prompt: str, temperature: float) -> st
     model = _get_ollama_model()
     num_predict = _get_ollama_num_predict()
 
+    num_ctx = _get_ollama_num_ctx()
+
     payload = {
         "model": model,
         "messages": [
@@ -68,6 +75,7 @@ def _call_ollama(system_prompt: str, user_prompt: str, temperature: float) -> st
         "options": {
             "temperature": temperature,
             "num_predict": num_predict,
+            "num_ctx": num_ctx,        # 컨텍스트 창 확장 (프롬프트+생성 합산)
         },
     }
 
@@ -118,6 +126,7 @@ def _call_ollama_stream(
     base_url = _get_ollama_base_url()
     model = _get_ollama_model()
     num_predict = _get_ollama_num_predict()
+    num_ctx = _get_ollama_num_ctx()
 
     payload = {
         "model": model,
@@ -130,6 +139,7 @@ def _call_ollama_stream(
         "options": {
             "temperature": temperature,
             "num_predict": num_predict,
+            "num_ctx": num_ctx,        # 컨텍스트 창 확장
         },
     }
 

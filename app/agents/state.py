@@ -41,6 +41,7 @@ class AgentState(TypedDict):
     
     # SPARQL Generation
     sparql_query: Optional[str]
+    mermaid_graph: Optional[str]
     relevant_properties: Annotated[List[str], add]
     
     # Execution

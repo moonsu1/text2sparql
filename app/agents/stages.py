@@ -122,16 +122,27 @@ JSON만 출력하세요:
     }
 
 
+GENERIC_PLACE_TYPES = {"카페", "cafe", "식당", "restaurant", "음식점", "회사", "office", "편의점", "마트"}
+
+
 def entity_resolution_stage(state: AgentState) -> Dict[str, Any]:
-    """Resolve person and place mentions to KG entities when available."""
+    """Resolve person and place mentions to KG entities when available.
+
+    Place resolution 정책:
+    - place_mention (구체적 장소명, e.g. "스타벅스") → KG 검색 후 SPARQL에 바인딩
+    - place_type (범주적, e.g. "카페") → KG 검색하지 않음, SPARQL에서 타입 필터로 처리
+      (카페 1000개를 모두 열거하면 오히려 노이즈, 타입 필터가 더 정확)
+    """
     print("\n[STAGE] Entity Resolution")
 
     entities = state.get("entities", {})
     resolved = dict(state.get("resolved_entities", {}))
 
     person_name = entities.get("person")
-    place_query = entities.get("place_mention") or entities.get("place_type")
+    place_mention = entities.get("place_mention")  # 구체적 장소명만 추출
+    place_type = entities.get("place_type")
 
+    # ── Person 조회 ──────────────────────────────────────────────────────
     if person_name and not resolved.get("person"):
         person_result = resolve_person_entity(person_name)
         if person_result:
@@ -141,15 +152,26 @@ def entity_resolution_stage(state: AgentState) -> Dict[str, Any]:
             print(f"  Person '{person_name}' not found; using search text")
             resolved["person"] = {"uri": None, "label": person_name, "search_name": person_name}
 
-    if place_query and not resolved.get("place"):
-        place_results = resolve_place_entity(place_query)
-        if place_results:
-            resolved["place"] = place_results
-            labels = [place.get("label", "") for place in place_results[:2]]
-            print(f"  Place resolved: {labels}")
+    # ── Place 조회: 구체적 장소명이 있을 때만 KG 검색 ───────────────────
+    if place_mention and not resolved.get("place"):
+        # 구체적 장소명 ("스타벅스") → KG에서 매칭되는 URI 조회
+        is_generic = place_mention.lower().strip() in GENERIC_PLACE_TYPES
+        if not is_generic:
+            place_results = resolve_place_entity(place_mention)
+            if place_results:
+                resolved["place"] = place_results
+                labels = [p.get("label", "") for p in place_results[:2]]
+                print(f"  Place resolved (specific): {labels}")
+            else:
+                print(f"  Place '{place_mention}' not found in KG")
+                resolved["place"] = []
         else:
-            print(f"  Place '{place_query}' not found")
-            resolved["place"] = []
+            print(f"  Place '{place_mention}' is generic type → KG 검색 생략, SPARQL 타입 필터 사용")
+    elif place_type and not resolved.get("place"):
+        # 범주만 있고 구체적 장소명 없음 → KG 검색 안 함 (타입 필터로 처리)
+        # Supervisor가 "place 미해결" 루프에 빠지지 않도록 빈 리스트로 완료 표시
+        resolved["place"] = []
+        print(f"  Place type '{place_type}' → KG 검색 생략, SPARQL 타입 필터 사용")
 
     return {
         "resolved_entities": resolved,
@@ -166,7 +188,7 @@ def sparql_generation_stage(state: AgentState) -> Dict[str, Any]:
     time_info = _format_time_info(state.get("time_constraint"))
     sparql_retry_count = state.get("sparql_retry_count", 0)
 
-    sparql_query = generate_sparql(
+    sparql_query, mermaid_graph = generate_sparql(
         query=query,
         intent=state.get("intent", "unknown"),
         entities_text=entities_text,
@@ -183,6 +205,7 @@ def sparql_generation_stage(state: AgentState) -> Dict[str, Any]:
 
     return {
         "sparql_query": sparql_query,
+        "mermaid_graph": mermaid_graph,
         "sparql_results": None,
         "result_verification": None,
         "sparql_retry_count": sparql_retry_count + 1,
@@ -447,13 +470,16 @@ def _format_entities_for_sparql_prompt(state: AgentState) -> str:
 
     place_info = resolved.get("place")
     if isinstance(place_info, list) and place_info:
+        # KG에서 찾은 구체적 장소명 → SPARQL에서 CONTAINS로 바인딩
         labels = [place.get("label", "") for place in place_info[:3] if place.get("label")]
         if labels:
-            parts.append(f"place: {', '.join(labels)}")
+            parts.append(f"place (specific, use CONTAINS filter): {', '.join(labels)}")
     elif entities.get("place_mention"):
-        parts.append(f"place: {entities['place_mention']}")
+        # KG에서 못 찾았지만 사용자가 언급한 구체적 장소명
+        parts.append(f"place (specific, use CONTAINS filter): {entities['place_mention']}")
     elif entities.get("place_type"):
-        parts.append(f"place_type: {entities['place_type']}")
+        # 범주형 장소 타입 → SPARQL에서 타입 필터로 처리
+        parts.append(f"place_type (use type filter, NOT specific label): {entities['place_type']}")
 
     if entities.get("event_title"):
         parts.append(f"event_title: {entities['event_title']}")

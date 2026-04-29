@@ -160,32 +160,57 @@ TEXT2SPARQL_USER_TEMPLATE = """# User Query
 - Time Constraint: {time_info}
 - Entities: {entities}
 
-# ⚠️ MANDATORY: Person Name Search Pattern
-If entities contain a person name, you MUST use this exact pattern:
+# ⚠️ MANDATORY Rules
 
+## Rule 1 — Person Name
+If entities contain a person name, use FILTER(CONTAINS(...)):
 ```sparql
 ?person rdfs:label ?name .
-FILTER(CONTAINS(?name, "partial_name_here"))
+FILTER(CONTAINS(?name, "Jung Su-jin"))
 ```
+DO NOT use exact literal: `?person rdfs:label "Jung Su-jin"` ❌
 
-Example 1 - If person="Kim Chul":
+## Rule 2 — Place Name (IMPORTANT!)
+If entities contain a specific place name like "스타벅스 역삼점" or "투썸플레이스 강남점",
+you MUST use FILTER(CONTAINS(...)) on the place label — do NOT use generic type filter alone:
 ```sparql
-?person rdfs:label ?name .
-FILTER(CONTAINS(?name, "Kim Chul"))
+?place rdfs:label ?placeLabel .
+FILTER(CONTAINS(?placeLabel, "스타벅스"))
 ```
-
-Example 2 - If person="Choi Dae":
-```sparql
-?person rdfs:label ?name .
-FILTER(CONTAINS(?name, "Choi Dae"))
-```
-
-DO NOT use: `?person rdfs:label "exact name"` ❌
+✅ CORRECT: use the specific place name from entities
+❌ WRONG: ignore place name and use only `?place a log:Cafe`
 
 # Additional Context
 {additional_context}
 
-Generate the SPARQL query:"""
+# Output Format
+First output the SPARQL query in a ```sparql block.
+Then output a Mermaid graph showing ONLY the key nodes and edges from the SPARQL WHERE clause.
+
+Mermaid rules:
+- Node ID MUST NOT start with "call" — use ev1, ev2, nd1, nd2, etc.
+- Node label: NodeID["TypeName: filter"]  e.g. ev1["CallEvent"] or nd1["Person: Jung Su-jin"]
+- NO newlines inside node labels (do NOT use \\n)
+- Edge label: use the English property local name (e.g. callee, startedAt, visitedAt, place)
+- Show only URI-type nodes; skip pure literal variables (?name, ?label, ?startTime)
+- 6 nodes max
+- If SPARQL has FILTER(?timeB > ?timeA) linking two event nodes, add a dashed edge:
+  ev_earlier -.->|visitedAfter| ev_later
+
+Example output:
+```sparql
+SELECT ...
+WHERE {{ ... }}
+```
+
+```mermaid
+graph LR
+  ev1["CallEvent"] -->|callee| nd1["Person: Jung Su-jin"]
+  ev1 -->|startedAt| nd2["datetime"]
+  ev2["VisitEvent"] -->|place| nd3["Cafe"]
+  ev1 -.->|visitedAfter| ev2
+```
+"""
 
 
 def format_properties_for_prompt(properties: List[Dict]) -> str:

@@ -286,7 +286,11 @@ def format_agent_event_for_markdown(event: Dict[str, Any], supervisor_index: int
 
         if stage == "sparql_generation":
             sparql = state.get("sparql_query")
-            return f"```sparql\n{sparql}\n```\n\n" if sparql else "SPARQL을 생성하지 못했습니다.\n\n"
+            mermaid = state.get("mermaid_graph")
+            result = f"```sparql\n{sparql}\n```\n\n" if sparql else "SPARQL을 생성하지 못했습니다.\n\n"
+            if mermaid:
+                result += f"**그래프 패턴**\n```mermaid\n{mermaid}\n```\n\n"
+            return result
 
         if stage == "execution":
             results = state.get("sparql_results") or []

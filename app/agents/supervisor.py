@@ -77,11 +77,12 @@ def supervisor_decide(state: Dict[str, Any]) -> Tuple[str, str]:
         if result_verification and result_verification.get("issue") in ("empty", "sparse"):
             if use_link_prediction and not link_prediction_done:
                 issue = result_verification["issue"]
+                # 희박 관계 쿼리(visitedAfter 등)는 SPARQL 자체가 해당 관계 트리플을 직접 조회 못함
+                # → 결과가 0건(empty)일 때만 LP 트리거. 1~2건이면 다른 관계로 오히려 맞는 결과.
+                # 단, is_sparse_relation=False인 일반 쿼리는 sparse 경우에도 LP 없이 통과.
                 if issue == "empty":
                     reasoning = "쿼리 결과가 비어있습니다. `링크 예측`으로 누락된 관계를 보강합니다."
-                else:
-                    reasoning = f"쿼리 결과가 {count}건으로 부족합니다. `링크 예측`으로 누락된 관계를 보강합니다."
-                return ("link_prediction", reasoning)
+                    return ("link_prediction", reasoning)
 
             if link_prediction_done and sparql_retry_count < MAX_SPARQL_RETRY:
                 return (
