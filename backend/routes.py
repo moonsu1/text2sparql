@@ -57,6 +57,11 @@ def get_agent():
         if provider in ("ollama", "qwen", "local"):
             print(f"[ROUTE] OLLAMA_BASE_URL: {ollama_url}", flush=True)
             print(f"[ROUTE] OLLAMA_MODEL: {ollama_model}", flush=True)
+        elif provider == "openai":
+            openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            openai_key = os.getenv("OPENAI_API_KEY", "")
+            print(f"[ROUTE] OPENAI_MODEL: {openai_model}", flush=True)
+            print(f"[ROUTE] OPENAI_API_KEY: {openai_key[:20] if openai_key else 'EMPTY'}...", flush=True)
         else:
             print(f"[ROUTE] GEMINI_MODEL: {model}", flush=True)
             print(f"[ROUTE] GEMINI_API_KEYS: {api_keys[:30] if api_keys else 'EMPTY'}...", flush=True)

@@ -87,6 +87,13 @@ def _generate_sparql_from_predictions(
     target_relation: Optional[str],
 ) -> str:
     rows = _prediction_rows(predicted_triples, prediction_confidence, prediction_evidence)
+
+    # ── 2-hop: 예측 결과가 2개이고 관계가 서로 다른 경우 ─────────────────
+    if len(rows) >= 2:
+        unique_relations = {_relation_label_from_uri(r["relation"]) for r in rows}
+        if len(unique_relations) >= 2:
+            return _generate_sparql_multihop(rows)
+
     relation = target_relation or _relation_label_from_uri(rows[0]["relation"])
 
     if relation == "visitedAfter":
@@ -179,6 +186,134 @@ WHERE {{
   }}
 }}
 ORDER BY DESC(xsd:decimal(?confidence))
+"""
+
+
+def _generate_sparql_multihop(rows: List[Dict[str, Any]]) -> str:
+    """
+    2-hop 예측 결과 2건을 VALUES 절에 바인딩해 체인 SPARQL 생성.
+
+    지원 체인:
+    - relatedEvent + metDuring   : Content → VisitEvent → Person
+    - visitedAfter + metDuring   : CallEvent → VisitEvent → Person
+    - visitedAfter + relatedEvent_rev: CallEvent → VisitEvent ← Content
+    - relatedEvent + visitedAfter_rev: Content → VisitEvent ← CallEvent
+    """
+    rel0 = _relation_label_from_uri(rows[0]["relation"])
+    rel1 = _relation_label_from_uri(rows[1]["relation"])
+
+    hop0_head = rows[0]["head"]
+    hop0_tail = rows[0]["tail"]   # 중간 노드 (VisitEvent)
+    hop1_head = rows[1]["head"]
+    hop1_tail = rows[1]["tail"]
+    conf0 = f"{rows[0]['confidence']:.2f}"
+    conf1 = f"{rows[1]['confidence']:.2f}"
+    ev0 = _sparql_literal(rows[0]["evidence"])
+    ev1 = _sparql_literal(rows[1]["evidence"])
+
+    # Content → VisitEvent → Person
+    if rel0 == "relatedEvent" and rel1 == "metDuring":
+        content_uri, visit_uri, person_uri = hop0_head, hop0_tail, hop1_tail
+        return f"""{_prefixes()}
+
+SELECT ?contentLabel ?capturedAt ?placeLabel ?visitTime ?personLabel
+WHERE {{
+  VALUES (?content ?visit ?person) {{
+    (<{content_uri}> <{visit_uri}> <{person_uri}>)
+  }}
+  ?content rdfs:label ?contentLabel ;
+           log:capturedAt ?capturedAt .
+  OPTIONAL {{ ?content log:capturedPlace ?cplace . ?cplace rdfs:label ?placeLabel . }}
+  ?visit log:visitedAt ?visitTime .
+  ?person rdfs:label ?personLabel .
+}}
+# 1차 예측(relatedEvent): 신뢰도 {conf0} — {rows[0]['evidence']}
+# 2차 예측(metDuring):    신뢰도 {conf1} — {rows[1]['evidence']}
+"""
+
+    # CallEvent → VisitEvent → Person
+    if rel0 == "visitedAfter" and rel1 == "metDuring":
+        call_uri, visit_uri, person_uri = hop0_head, hop0_tail, hop1_tail
+        return f"""{_prefixes()}
+
+SELECT ?calleeLabel ?callTime ?placeLabel ?visitTime ?personLabel
+WHERE {{
+  VALUES (?call ?visit ?person) {{
+    (<{call_uri}> <{visit_uri}> <{person_uri}>)
+  }}
+  ?call log:callee ?callee ;
+        log:startedAt ?callTime .
+  ?callee rdfs:label ?calleeLabel .
+  ?visit log:visitedAt ?visitTime ;
+         log:place ?place .
+  ?place rdfs:label ?placeLabel .
+  ?person rdfs:label ?personLabel .
+}}
+# 1차 예측(visitedAfter): 신뢰도 {conf0} — {rows[0]['evidence']}
+# 2차 예측(metDuring):    신뢰도 {conf1} — {rows[1]['evidence']}
+"""
+
+    # CallEvent → VisitEvent ← Content  (역방향 relatedEvent)
+    if rel0 == "visitedAfter" and rel1 == "relatedEvent":
+        call_uri, visit_uri = hop0_head, hop0_tail
+        # 2차는 역방향: head=content, tail=visit
+        content_uri = hop1_head if hop1_tail == visit_uri else hop1_tail
+        return f"""{_prefixes()}
+
+SELECT ?calleeLabel ?callTime ?placeLabel ?visitTime ?contentLabel ?capturedAt
+WHERE {{
+  VALUES (?call ?visit ?content) {{
+    (<{call_uri}> <{visit_uri}> <{content_uri}>)
+  }}
+  ?call log:callee ?callee ;
+        log:startedAt ?callTime .
+  ?callee rdfs:label ?calleeLabel .
+  ?visit log:visitedAt ?visitTime ;
+         log:place ?place .
+  ?place rdfs:label ?placeLabel .
+  ?content rdfs:label ?contentLabel ;
+           log:capturedAt ?capturedAt .
+}}
+# 1차 예측(visitedAfter):    신뢰도 {conf0} — {rows[0]['evidence']}
+# 2차 예측(relatedEvent_rev): 신뢰도 {conf1} — {rows[1]['evidence']}
+"""
+
+    # Content → VisitEvent ← CallEvent  (역방향 visitedAfter)
+    if rel0 == "relatedEvent" and rel1 == "visitedAfter":
+        content_uri, visit_uri = hop0_head, hop0_tail
+        call_uri = hop1_head if hop1_tail == visit_uri else hop1_tail
+        return f"""{_prefixes()}
+
+SELECT ?contentLabel ?capturedAt ?placeLabel ?visitTime ?calleeLabel ?callTime
+WHERE {{
+  VALUES (?content ?visit ?call) {{
+    (<{content_uri}> <{visit_uri}> <{call_uri}>)
+  }}
+  ?content rdfs:label ?contentLabel ;
+           log:capturedAt ?capturedAt .
+  ?visit log:visitedAt ?visitTime ;
+         log:place ?place .
+  ?place rdfs:label ?placeLabel .
+  ?call log:callee ?callee ;
+        log:startedAt ?callTime .
+  ?callee rdfs:label ?calleeLabel .
+}}
+# 1차 예측(relatedEvent):     신뢰도 {conf0} — {rows[0]['evidence']}
+# 2차 예측(visitedAfter_rev): 신뢰도 {conf1} — {rows[1]['evidence']}
+"""
+
+    # 알 수 없는 체인 조합 → 일반 2-triple VALUES fallback
+    lines = []
+    for row in rows:
+        lines.append(f"    (<{row['head']}> <{row['tail']}> \"{row['confidence']:.2f}\" {_sparql_literal(row['evidence'])})")
+    return f"""{_prefixes()}
+
+SELECT ?head ?tail ?confidence ?evidence
+WHERE {{
+  VALUES (?head ?tail ?confidence ?evidence) {{
+{chr(10).join(lines)}
+  }}
+}}
 """
 
 

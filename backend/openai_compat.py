@@ -105,6 +105,8 @@ STAGE_LABELS = {
     "sparql_generation": "SPARQL 생성",
     "execution": "쿼리 실행",
     "link_prediction": "링크 예측",
+    "link_prediction_hop1": "링크 예측 (1차)",
+    "link_prediction_hop2": "링크 예측 (2차)",
     "answer": "최종 답변",
 }
 
@@ -114,6 +116,8 @@ STAGE_PROGRESS_TEXT = {
     "sparql_generation": "_SPARQL을 생성하는 중입니다..._\n\n",
     "execution": "_쿼리를 실행하는 중입니다..._\n\n",
     "link_prediction": "_누락된 관계를 예측하는 중입니다..._\n\n",
+    "link_prediction_hop1": "_1차 링크 예측 중입니다..._\n\n",
+    "link_prediction_hop2": "_2차 링크 예측 중입니다..._\n\n",
 }
 
 
@@ -297,7 +301,16 @@ def format_agent_event_for_markdown(event: Dict[str, Any], supervisor_index: int
             exec_time = state.get("execution_time_ms", 0)
             return f"실행 결과: `{len(results)}`건, `{exec_time:.2f}ms`\n\n" + _format_results_table(results)
 
-        if stage == "link_prediction":
+        if stage in ("link_prediction", "link_prediction_hop1", "link_prediction_hop2"):
+            lp_hop_index = state.get("lp_hop_index", 0)
+            lp_chain = state.get("lp_chain")
+            if lp_chain:
+                if stage == "link_prediction_hop1" or (stage == "link_prediction" and lp_hop_index == 1):
+                    hop_label = f"[1단계 예측 완료 — 체인 `{lp_chain}` 중간 노드 확보]\n\n"
+                    return hop_label + _format_prediction_summary(state)
+                elif stage == "link_prediction_hop2" or lp_hop_index >= 2:
+                    hop_label = f"[2단계 예측 완료 — 체인 `{lp_chain}` 최종 예측]\n\n"
+                    return hop_label + _format_prediction_summary(state)
             return _format_prediction_summary(state)
 
         if stage == "answer":

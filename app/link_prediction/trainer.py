@@ -92,7 +92,10 @@ class LinkPredictionTrainer:
             )
 
             # Margin ranking loss: pos_score > neg_score + margin
-            loss = torch.relu(self.margin - pos_scores + neg_scores).mean()
+            # pos_scores: [B], neg_scores: [B * num_negatives]
+            # pos를 각 negative에 대해 반복하여 shape 맞춤
+            pos_repeated = pos_scores.repeat_interleave(num_negatives)
+            loss = torch.relu(self.margin - pos_repeated + neg_scores).mean()
 
             self.optimizer.zero_grad()
             loss.backward()

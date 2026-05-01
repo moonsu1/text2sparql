@@ -1,8 +1,9 @@
 """
-LLM Client - Multi-Provider (Gemini / Ollama)
+LLM Client - Multi-Provider (Gemini / Ollama / OpenAI)
 
-LLM_PROVIDER=gemini  → Gemini API (기본)
-LLM_PROVIDER=ollama  → Ollama /api/chat (Qwen 등 로컬 모델)
+LLM_PROVIDER=gemini   → Gemini API
+LLM_PROVIDER=ollama   → Ollama /api/chat (Qwen 등 로컬 모델)
+LLM_PROVIDER=openai   → OpenAI API (gpt-4o-mini 등)
 """
 
 import os
@@ -25,8 +26,16 @@ _exhausted_keys: dict = {}
 # ═══════════════════════════════════════════════════════════
 
 def _get_provider() -> str:
-    """현재 LLM_PROVIDER 반환 ('gemini' 또는 'ollama')"""
+    """현재 LLM_PROVIDER 반환 ('gemini', 'ollama', 'openai')"""
     return os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+
+
+def _get_openai_key() -> str:
+    return os.getenv("OPENAI_API_KEY", "").strip()
+
+
+def _get_openai_model() -> str:
+    return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 
 def _get_ollama_base_url() -> str:
@@ -183,6 +192,76 @@ def _call_ollama_stream(
     except Exception as e:
         print(f"  [ollama-stream] 실패: {str(e)[:120]}")
         yield f"[ERROR] Ollama 스트리밍 실패: {str(e)[:80]}"
+
+
+# ═══════════════════════════════════════════════════════════
+# OpenAI 구현
+# ═══════════════════════════════════════════════════════════
+
+def _call_openai(system_prompt: str, user_prompt: str, temperature: float) -> str:
+    """OpenAI Chat Completions (blocking)."""
+    from openai import OpenAI
+    api_key = _get_openai_key()
+    if not api_key:
+        return "[ERROR] OPENAI_API_KEY를 .env에 설정해주세요"
+
+    client = OpenAI(api_key=api_key)
+    model = _get_openai_model()
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_completion_tokens=4096,
+        )
+        content = resp.choices[0].message.content or ""
+        if not content:
+            print(f"  [openai] 빈 응답 (model={model})")
+            return "[ERROR] OpenAI 빈 응답"
+        return content
+    except Exception as e:
+        err = str(e)
+        print(f"  [openai] 호출 실패: {err[:120]}")
+        return f"[ERROR] OpenAI 호출 실패: {err[:80]}"
+
+
+def _call_openai_stream(
+    system_prompt: str, user_prompt: str, temperature: float
+) -> Iterator[str]:
+    """OpenAI Chat Completions (streaming)."""
+    from openai import OpenAI
+    api_key = _get_openai_key()
+    if not api_key:
+        yield "[ERROR] OPENAI_API_KEY를 .env에 설정해주세요"
+        return
+
+    client = OpenAI(api_key=api_key)
+    model = _get_openai_model()
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_completion_tokens=4096,
+            stream=True,
+        )
+        yielded_any = False
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content or ""
+            if delta:
+                yielded_any = True
+                yield delta
+        if not yielded_any:
+            print(f"  [openai-stream] 빈 스트리밍 응답 (model={model})")
+            yield "[ERROR] OpenAI 스트리밍 빈 응답"
+    except Exception as e:
+        err = str(e)
+        print(f"  [openai-stream] 실패: {err[:120]}")
+        yield f"[ERROR] OpenAI 스트리밍 실패: {err[:80]}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -408,6 +487,10 @@ def call_llm(
         print(f" model={_get_ollama_model()}")
         return _call_ollama(system_prompt, user_prompt, temperature)
 
+    if provider == "openai":
+        print(f" model={_get_openai_model()}")
+        return _call_openai(system_prompt, user_prompt, temperature)
+
     print(f" model={os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')}")
     return _call_gemini(system_prompt, user_prompt, temperature)
 
@@ -429,6 +512,10 @@ def call_llm_stream(
 
     if provider in ("ollama", "qwen", "local"):
         yield from _call_ollama_stream(system_prompt, user_prompt, temperature)
+        return
+
+    if provider == "openai":
+        yield from _call_openai_stream(system_prompt, user_prompt, temperature)
         return
 
     yield from _call_gemini_stream(system_prompt, user_prompt, temperature)

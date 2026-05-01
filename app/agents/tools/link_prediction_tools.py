@@ -28,6 +28,19 @@ RELATION_URIS = {
     "usedDuring": f"{LOG}usedDuring",
 }
 
+# 온톨로지가 허용하는 모든 2-hop 경로 정의
+# "_rev" suffix = 역방향 탐색 (tail→head 방향으로 연결된 노드 탐색)
+MULTIHOP_CHAINS: Dict[str, List[str]] = {
+    # Content → VisitEvent → Person
+    "relatedEvent+metDuring":        ["relatedEvent",        "metDuring"],
+    # CallEvent → VisitEvent → Person
+    "visitedAfter+metDuring":        ["visitedAfter",        "metDuring"],
+    # CallEvent → VisitEvent ← Content  (2차: VisitEvent에 연결된 Content 역방향 탐색)
+    "visitedAfter+relatedEvent_rev": ["visitedAfter",        "relatedEvent_rev"],
+    # Content → VisitEvent ← CallEvent  (2차: VisitEvent를 head로 가진 CallEvent 역방향 탐색)
+    "relatedEvent+visitedAfter_rev": ["relatedEvent",        "visitedAfter_rev"],
+}
+
 
 def predict_sparse_relations(state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -166,7 +179,9 @@ def _embed_met_during(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
         visit_uri = row.get("visit", "")
         if not visit_uri:
             continue
-        preds = mgr.predict(visit_uri, "metDuring", top_k=3, node_type_filter="person")
+        # node_type_filter=None: person URI에 "person" 문자열이 없으므로 필터 없이 예측
+        # _fetch_person_detail이 비-person URI를 자동 스킵
+        preds = mgr.predict(visit_uri, "metDuring", top_k=5, node_type_filter=None)
         for tail_uri, confidence in preds:
             detail = _fetch_person_detail(tail_uri)
             if not detail:
@@ -186,7 +201,24 @@ def _embed_met_during(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
 
 
 def _embed_related_event(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
-    """Content → (relatedEvent) → VisitEvent 임베딩 예측."""
+    """Content → (relatedEvent) → VisitEvent 임베딩 예측.
+
+    state에서 장소명·날짜를 추출해 head entity를 좁힘으로써
+    관련 없는 사진의 높은-confidence 예측이 최상위를 차지하는 문제를 방지.
+    """
+    place_keyword = _place_keyword(state)
+    place_filter = _contains_filter("?placeLabel", place_keyword) if place_keyword else ""
+
+    # 날짜 힌트 추출 (쿼리에 "4월 17일", "4/17" 등)
+    date_filter = ""
+    query_text = state.get("query", "")
+    import re as _re
+    date_match = _re.search(r"(\d{1,2})월\s*(\d{1,2})일", query_text)
+    if date_match:
+        m, d = date_match.group(1).zfill(2), date_match.group(2).zfill(2)
+        date_str = f"2026-{m}-{d}"
+        date_filter = f'FILTER(STRSTARTS(STR(?capturedAt), "{date_str}"))'
+
     head_rows = _execute_select(f"""
         PREFIX log: <{LOG}>
         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -194,6 +226,9 @@ def _embed_related_event(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
           ?content a log:Content ;
                    rdfs:label ?contentLabel ;
                    log:capturedAt ?capturedAt .
+          OPTIONAL {{ ?content log:capturedPlace ?cp . ?cp rdfs:label ?placeLabel . }}
+          {place_filter}
+          {date_filter}
         }}
     """)
 
@@ -240,7 +275,8 @@ def _embed_used_during(state: Dict[str, Any], mgr) -> List[Dict[str, Any]]:
         app_uri = row.get("appEvent", "")
         if not app_uri:
             continue
-        preds = mgr.predict(app_uri, "usedDuring", top_k=3, node_type_filter="calendar")
+        # calendar URI는 "cal_XXX" 패턴
+        preds = mgr.predict(app_uri, "usedDuring", top_k=3, node_type_filter="cal_")
         for tail_uri, confidence in preds:
             detail = _fetch_calendar_detail(tail_uri)
             if not detail:
@@ -297,28 +333,330 @@ def _fetch_calendar_detail(cal_uri: str) -> Optional[Dict[str, Any]]:
 
 
 def infer_target_relation(state: Dict[str, Any]) -> Optional[str]:
-    """Infer the completion relation from query wording when analysis missed it."""
+    """
+    Infer the completion relation (or multi-hop chain) from query wording.
+
+    반환값:
+    - 단일 관계: "visitedAfter", "metDuring", "relatedEvent", "usedDuring"
+    - 2-hop 체인: MULTIHOP_CHAINS의 키 (예: "relatedEvent+metDuring")
+    """
     query = (state.get("query") or "").lower()
     entities = state.get("entities") or {}
 
+    # 이미 명시된 관계가 있으면 우선 사용
     explicit = state.get("target_relation")
-    if explicit in RELATION_URIS:
+    if explicit in RELATION_URIS or explicit in MULTIHOP_CHAINS:
         return explicit
 
-    if any(word in query for word in ["사진", "photo", "콘텐츠", "찍은"]):
+    has_photo = any(word in query for word in ["사진", "photo", "찍은", "콘텐츠"])
+    has_call_after = any(word in query for word in ["통화", "call"]) and any(
+        word in query for word in ["후", "뒤", "나서", "after"]
+    )
+    has_who = any(word in query for word in ["누구", "만났", "만난", "met"])
+    has_place = bool(entities.get("place_type") or entities.get("place_mention"))
+
+    # ── 2-hop 패턴 감지 (1-hop보다 먼저 체크) ───────────────────────────
+    # 사진 + 누구 → Content → VisitEvent → Person
+    if has_photo and has_who:
+        return "relatedEvent+metDuring"
+    # 통화 후 + 누구 → CallEvent → VisitEvent → Person
+    if has_call_after and has_who and has_place:
+        return "visitedAfter+metDuring"
+    # 통화 후 + 사진 → CallEvent → VisitEvent ← Content
+    if has_call_after and has_photo:
+        return "visitedAfter+relatedEvent_rev"
+    # 사진 + 통화 (역방향) → Content → VisitEvent ← CallEvent
+    if has_photo and any(word in query for word in ["통화", "call"]) and not has_call_after:
+        return "relatedEvent+visitedAfter_rev"
+
+    # ── 1-hop 패턴 ────────────────────────────────────────────────────────
+    if has_photo:
         return "relatedEvent"
     if any(word in query for word in ["앱", "app", "notion", "slack", "gmail"]):
         return "usedDuring"
-    if any(word in query for word in ["누구", "만났", "만난", "met"]) and (
-        entities.get("place_type") or entities.get("place_mention") or "스타벅스" in query
-    ):
+    if has_who and has_place:
         return "metDuring"
-    if any(word in query for word in ["통화", "call"]) and any(
-        word in query for word in ["후", "뒤", "나서", "after"]
-    ):
+    if has_call_after:
         return "visitedAfter"
 
     return None
+
+
+def predict_second_hop(
+    state: Dict[str, Any],
+    intermediate_uri: str,
+    second_relation: str,
+) -> List[Dict[str, Any]]:
+    """
+    2차 LP: intermediate_uri를 anchor로 고정해 second_relation을 예측.
+
+    - 정방향 (second_relation in RELATION_URIS): intermediate_uri가 head
+    - 역방향 (_rev suffix): intermediate_uri가 tail, 연결된 head를 탐색
+    """
+    is_reverse = second_relation.endswith("_rev")
+    base_relation = second_relation.removesuffix("_rev")
+
+    if base_relation not in RELATION_URIS:
+        return []
+
+    # ── 임베딩 모델 시도 ────────────────────────────────────────────────
+    try:
+        from app.link_prediction.kg_model_manager import get_model_manager
+        mgr = get_model_manager()
+        if mgr.is_ready:
+            if base_relation == "metDuring" and not is_reverse:
+                # person URI에 "person"이 없으므로 필터 없이 예측 후 _fetch_person_detail로 스킵
+                preds = mgr.predict(intermediate_uri, "metDuring", top_k=5, node_type_filter=None)
+                results = []
+                for tail_uri, confidence in preds:
+                    detail = _fetch_person_detail(tail_uri)
+                    if not detail:
+                        continue
+                    results.append(_build_evidence(
+                        row={"visit": intermediate_uri, "person": tail_uri, **detail},
+                        relation="metDuring",
+                        confidence=confidence,
+                        minutes=0,
+                        evidence=f"GCN+TransE 임베딩 2차 예측 (신뢰도 {confidence:.2f})",
+                        head_key="visit",
+                        tail_key="person",
+                        head_label=_local_id(intermediate_uri),
+                        tail_label=detail.get("personLabel"),
+                        timestamps={},
+                    ))
+                if results:
+                    print(f"  [LP-2hop] 임베딩 2차 예측 {len(results)}건 (relation={base_relation})")
+                    return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)
+
+            elif base_relation == "relatedEvent" and is_reverse:
+                # VisitEvent를 place 기준으로 Content 역방향 탐색
+                # content(사진) URI는 "photo_XXX" 패턴
+                preds = mgr.predict(intermediate_uri, "relatedEvent", top_k=3, node_type_filter="photo")
+                results = []
+                for content_uri, confidence in preds:
+                    rows = _execute_select(f"""
+                        PREFIX log: <{LOG}>
+                        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                        SELECT ?contentLabel ?capturedAt WHERE {{
+                          <{content_uri}> rdfs:label ?contentLabel ;
+                                          log:capturedAt ?capturedAt .
+                        }}
+                    """)
+                    if not rows:
+                        continue
+                    results.append(_build_evidence(
+                        row={"content": content_uri, "visit": intermediate_uri, **rows[0]},
+                        relation="relatedEvent",
+                        confidence=confidence,
+                        minutes=0,
+                        evidence=f"GCN+TransE 임베딩 2차 예측 역방향 (신뢰도 {confidence:.2f})",
+                        head_key="content",
+                        tail_key="visit",
+                        head_label=rows[0].get("contentLabel"),
+                        tail_label=_local_id(intermediate_uri),
+                        timestamps={"capturedAt": rows[0].get("capturedAt")},
+                    ))
+                if results:
+                    return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)
+
+            elif base_relation == "visitedAfter" and is_reverse:
+                # VisitEvent를 tail로 가진 CallEvent 역방향 탐색
+                preds = mgr.predict(intermediate_uri, "visitedAfter", top_k=3, node_type_filter="call")
+                results = []
+                for call_uri, confidence in preds:
+                    rows = _execute_select(f"""
+                        PREFIX log: <{LOG}>
+                        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                        SELECT ?callTime ?personLabel WHERE {{
+                          <{call_uri}> log:startedAt ?callTime ;
+                                       log:callee ?person .
+                          ?person rdfs:label ?personLabel .
+                        }}
+                    """)
+                    if not rows:
+                        continue
+                    results.append(_build_evidence(
+                        row={"call": call_uri, "visit": intermediate_uri, **rows[0]},
+                        relation="visitedAfter",
+                        confidence=confidence,
+                        minutes=0,
+                        evidence=f"GCN+TransE 임베딩 2차 예측 역방향 (신뢰도 {confidence:.2f})",
+                        head_key="call",
+                        tail_key="visit",
+                        head_label=rows[0].get("personLabel"),
+                        tail_label=_local_id(intermediate_uri),
+                        timestamps={"callTime": rows[0].get("callTime")},
+                    ))
+                if results:
+                    return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)
+    except Exception as e:
+        print(f"  [LP-2hop] 임베딩 2차 예측 실패: {e}")
+
+    # ── Rule-based fallback ───────────────────────────────────────────────
+    return _rule_based_second_hop(state, intermediate_uri, base_relation, is_reverse)
+
+
+def _rule_based_second_hop(
+    state: Dict[str, Any],
+    intermediate_uri: str,
+    base_relation: str,
+    is_reverse: bool,
+) -> List[Dict[str, Any]]:
+    """Rule-based 2차 hop 예측."""
+    if base_relation == "metDuring" and not is_reverse:
+        # VisitEvent → Person: 방문 시각에 가장 가까운 통화 상대
+        visit_rows = _execute_select(f"""
+            PREFIX log: <{LOG}>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT ?visitTime ?placeLabel WHERE {{
+              <{intermediate_uri}> log:visitedAt ?visitTime ;
+                                   log:place ?place .
+              ?place rdfs:label ?placeLabel .
+            }}
+        """)
+        if not visit_rows:
+            return []
+        visit_time = _parse_datetime(visit_rows[0].get("visitTime"))
+        if not visit_time:
+            return []
+
+        call_rows = _execute_select(f"""
+            PREFIX log: <{LOG}>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT ?call ?person ?personLabel ?callTime WHERE {{
+              ?call a log:CallEvent ;
+                    log:callee ?person ;
+                    log:startedAt ?callTime .
+              ?person rdfs:label ?personLabel .
+            }}
+        """)
+        results = []
+        for row in call_rows:
+            call_time = _parse_datetime(row.get("callTime"))
+            if not call_time:
+                continue
+            minutes = _minutes_between(call_time, visit_time)
+            if minutes is None or minutes < 0 or minutes > 90:
+                continue
+            confidence = _time_confidence(minutes)
+            results.append(_build_evidence(
+                row={"visit": intermediate_uri, "person": row.get("person"), **row},
+                relation="metDuring",
+                confidence=min(confidence, 0.98),
+                minutes=minutes,
+                evidence=f"방문 {minutes}분 전 {row.get('personLabel', '?')}과 통화 기록",
+                head_key="visit",
+                tail_key="person",
+                head_label=visit_rows[0].get("placeLabel"),
+                tail_label=row.get("personLabel"),
+                timestamps={"callTime": row.get("callTime"),
+                            "visitTime": visit_rows[0].get("visitTime")},
+            ))
+        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:1]
+
+    if base_relation == "relatedEvent" and is_reverse:
+        # VisitEvent ← Content: 같은 장소·시각대 사진 탐색
+        visit_rows = _execute_select(f"""
+            PREFIX log: <{LOG}>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT ?visitTime ?placeLabel WHERE {{
+              <{intermediate_uri}> log:visitedAt ?visitTime ;
+                                   log:place ?place .
+              ?place rdfs:label ?placeLabel .
+            }}
+        """)
+        if not visit_rows:
+            return []
+        visit_time = _parse_datetime(visit_rows[0].get("visitTime"))
+        if not visit_time:
+            return []
+        place_label = visit_rows[0].get("placeLabel", "")
+
+        content_rows = _execute_select(f"""
+            PREFIX log: <{LOG}>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT ?content ?contentLabel ?capturedAt ?capturedPlace WHERE {{
+              ?content a log:Content ;
+                       rdfs:label ?contentLabel ;
+                       log:capturedAt ?capturedAt ;
+                       log:capturedPlace ?capturedPlace .
+              ?capturedPlace rdfs:label ?cPlaceLabel .
+              FILTER(CONTAINS(LCASE(STR(?cPlaceLabel)), LCASE("{place_label}")))
+            }}
+        """)
+        results = []
+        for row in content_rows:
+            captured_at = _parse_datetime(row.get("capturedAt"))
+            if not captured_at:
+                continue
+            minutes = abs(_minutes_between(visit_time, captured_at) or 0)
+            if minutes > 60:
+                continue
+            confidence = 0.97 if minutes <= 10 else 0.85
+            results.append(_build_evidence(
+                row={"content": row.get("content"), "visit": intermediate_uri, **row},
+                relation="relatedEvent",
+                confidence=min(confidence, 0.98),
+                minutes=minutes,
+                evidence=f"사진 촬영 위치가 {place_label}이고 방문 시각과 {minutes}분 차이",
+                head_key="content",
+                tail_key="visit",
+                head_label=row.get("contentLabel"),
+                tail_label=visit_rows[0].get("placeLabel"),
+                timestamps={"capturedAt": row.get("capturedAt"),
+                            "visitTime": visit_rows[0].get("visitTime")},
+            ))
+        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:1]
+
+    if base_relation == "visitedAfter" and is_reverse:
+        # VisitEvent ← CallEvent: 방문 직전 통화 탐색
+        visit_rows = _execute_select(f"""
+            PREFIX log: <{LOG}>
+            SELECT ?visitTime WHERE {{
+              <{intermediate_uri}> log:visitedAt ?visitTime .
+            }}
+        """)
+        if not visit_rows:
+            return []
+        visit_time = _parse_datetime(visit_rows[0].get("visitTime"))
+        if not visit_time:
+            return []
+
+        call_rows = _execute_select(f"""
+            PREFIX log: <{LOG}>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+            SELECT ?call ?person ?personLabel ?callTime WHERE {{
+              ?call a log:CallEvent ;
+                    log:callee ?person ;
+                    log:startedAt ?callTime .
+              ?person rdfs:label ?personLabel .
+            }}
+        """)
+        results = []
+        for row in call_rows:
+            call_time = _parse_datetime(row.get("callTime"))
+            if not call_time:
+                continue
+            minutes = _minutes_between(call_time, visit_time)
+            if minutes is None or minutes < 0 or minutes > 180:
+                continue
+            confidence = _time_confidence(minutes)
+            results.append(_build_evidence(
+                row={"call": row.get("call"), "visit": intermediate_uri, **row},
+                relation="visitedAfter",
+                confidence=min(confidence, 0.98),
+                minutes=minutes,
+                evidence=f"방문 {minutes}분 전 {row.get('personLabel', '?')}과 통화 기록 (역방향)",
+                head_key="call",
+                tail_key="visit",
+                head_label=row.get("personLabel"),
+                tail_label=_local_id(intermediate_uri),
+                timestamps={"callTime": row.get("callTime"),
+                            "visitTime": visit_rows[0].get("visitTime")},
+            ))
+        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:1]
+
+    return []
 
 
 def predict_visited_after(state: Dict[str, Any]) -> List[Dict[str, Any]]:

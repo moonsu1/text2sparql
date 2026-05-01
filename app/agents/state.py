@@ -38,6 +38,11 @@ class AgentState(TypedDict):
     predicted_triples: Annotated[List[tuple], add]
     prediction_confidence: Annotated[List[float], add]
     prediction_evidence: Annotated[List[Dict[str, Any]], add]
+
+    # Multi-hop LP
+    lp_chain: Optional[str]          # 체인 식별자 (예: "relatedEvent+metDuring"), None이면 1-hop
+    lp_hop_index: int                 # 현재 실행 중인 hop 번호 (0=1차, 1=2차)
+    lp_intermediate_node: Optional[str]  # 1차 예측 tail URI → 2차 LP의 head
     
     # SPARQL Generation
     sparql_query: Optional[str]

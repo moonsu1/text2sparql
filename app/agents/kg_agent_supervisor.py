@@ -151,6 +151,11 @@ class KGAgentSupervisor:
             "link_prediction_done": False,
             "sparql_retry_count": 0,
 
+            # Multi-hop LP
+            "lp_chain": initial_result.get("lp_chain"),
+            "lp_hop_index": initial_result.get("lp_hop_index", 0),
+            "lp_intermediate_node": initial_result.get("lp_intermediate_node"),
+
             # 나머지 초기화
             "is_sparse": False,
             "missing_relations": [],

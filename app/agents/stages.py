@@ -22,7 +22,11 @@ from app.agents.tools.entity_tools import (
     resolve_place_entity,
 )
 from app.agents.tools.execution_tools import execute_sparql_on_fuseki, verify_results_quality
-from app.agents.tools.link_prediction_tools import predict_sparse_relations
+from app.agents.tools.link_prediction_tools import (
+    predict_sparse_relations,
+    predict_second_hop,
+    MULTIHOP_CHAINS,
+)
 from app.agents.tools.sparql_tools import generate_sparql, verify_sparql_syntax
 
 
@@ -71,11 +75,17 @@ JSON만 출력하세요:
     # LLM이 유효하지 않은 값을 반환할 수 있으므로, 유효한 관계명인지 검증 후 fallback 적용
     LINK_PREDICTION_RELATIONS = {"visitedAfter", "metDuring", "relatedEvent", "usedDuring"}
     _llm_relation = _none_if_null(analysis.get("target_relation"))
-    if _llm_relation in LINK_PREDICTION_RELATIONS:
+
+    # Rule-based 2-hop 감지를 항상 먼저 시도 (LLM은 단일 관계만 알기 때문)
+    _rule_relation = _infer_target_relation_from_query(query)
+    if _rule_relation in MULTIHOP_CHAINS:
+        # 2-hop 패턴이 감지되면 LLM 결과 무시하고 chain으로 결정
+        target_relation = _rule_relation
+    elif _llm_relation in LINK_PREDICTION_RELATIONS:
         target_relation = _llm_relation
     else:
-        # LLM이 유효하지 않거나 null → rule-based로 확실하게 결정
-        target_relation = _infer_target_relation_from_query(query)
+        # LLM이 유효하지 않거나 null → rule-based 1-hop 결과 사용
+        target_relation = _rule_relation
 
     person_mention = _none_if_null(analysis.get("person_mention")) or _extract_person_mention(query)
     place_type = _normalize_place_type(_none_if_null(analysis.get("place_type"))) or _extract_place_type(query)
@@ -103,10 +113,22 @@ JSON만 출력하세요:
     print(f"  Time: {time_constraint}")
 
     # target_relation이 있으면 LP 후보로 표시 (실제 트리거는 SPARQL 결과 0건 or sparse일 때)
-    use_link_prediction = target_relation in LINK_PREDICTION_RELATIONS if target_relation else False
+    # 멀티홉 체인인 경우: lp_chain에 체인 키 저장, target_relation은 1차 관계로 설정
+    lp_chain = None
+    if target_relation in MULTIHOP_CHAINS:
+        lp_chain = target_relation
+        first_relation = MULTIHOP_CHAINS[target_relation][0]
+        target_relation = first_relation  # 1차 LP에 사용할 관계
+        print(f"  [Analysis] 멀티홉 체인 감지: {lp_chain} → 1차={target_relation}")
+
+    use_link_prediction = (
+        target_relation in LINK_PREDICTION_RELATIONS
+        or lp_chain in MULTIHOP_CHAINS
+    ) if (target_relation or lp_chain) else False
 
     if use_link_prediction:
-        print(f"  [Analysis] target_relation={target_relation} → SPARQL 실행 후 결과 없으면 LP 대기")
+        label = f"chain={lp_chain}" if lp_chain else f"relation={target_relation}"
+        print(f"  [Analysis] {label} → SPARQL 실행 후 결과 없으면 LP 대기")
 
     return {
         "intent": intent,
@@ -119,6 +141,9 @@ JSON만 출력하세요:
         "link_prediction_done": False,
         "sparql_retry_count": 0,
         "use_link_prediction": use_link_prediction,
+        "lp_chain": lp_chain,
+        "lp_hop_index": 0,
+        "lp_intermediate_node": None,
     }
 
 
@@ -242,21 +267,76 @@ def execution_stage(state: AgentState) -> Dict[str, Any]:
 
 
 def link_prediction_stage(state: AgentState) -> Dict[str, Any]:
-    """Complete sparse relations from observed temporal/place/person evidence."""
+    """Complete sparse relations from observed temporal/place/person evidence.
+
+    멀티홉 체인인 경우:
+    - lp_hop_index == 0: 1차 LP 수행, 결과 tail을 lp_intermediate_node에 저장
+    - lp_hop_index == 1: lp_intermediate_node를 head로 2차 LP 수행, link_prediction_done=True
+    """
     print("\n[STAGE] Link Prediction")
 
+    lp_chain = state.get("lp_chain")
+    lp_hop_index = state.get("lp_hop_index", 0)
+    lp_intermediate_node = state.get("lp_intermediate_node")
+
+    # ── 멀티홉 2차 hop ─────────────────────────────────────────────────
+    if lp_chain and lp_hop_index == 1 and lp_intermediate_node:
+        second_relation = MULTIHOP_CHAINS[lp_chain][1]
+        print(f"  [2-hop] 2차 예측 시작: chain={lp_chain}, relation={second_relation}, head={lp_intermediate_node}")
+
+        predictions = predict_second_hop(state, lp_intermediate_node, second_relation)
+        predicted_triples = [
+            (p["head"], p["relation"], p["tail"])
+            for p in predictions
+        ]
+        confidences = [p["confidence"] for p in predictions]
+
+        print(f"  [2-hop] 2차 예측 결과: {len(predicted_triples)}건")
+
+        return {
+            "predicted_triples": predicted_triples,
+            "prediction_confidence": confidences,
+            "prediction_evidence": predictions,
+            "link_prediction_done": True,
+            "lp_hop_index": 2,
+            "sparql_query": None,
+            "sparql_results": None,
+            "result_verification": None,
+            "workflow_path": ["link_prediction_hop2"],
+        }
+
+    # ── 1차 hop (1-hop 단일 관계 또는 멀티홉 1차) ─────────────────────
     result = predict_sparse_relations(state)
     predictions = result.get("predictions", [])
 
     predicted_triples = [
-        (prediction["head"], prediction["relation"], prediction["tail"])
-        for prediction in predictions
+        (p["head"], p["relation"], p["tail"])
+        for p in predictions
     ]
-    confidences = [prediction["confidence"] for prediction in predictions]
+    confidences = [p["confidence"] for p in predictions]
 
     print(f"  Target relation: {result.get('target_relation')}")
     print(f"  Predictions: {len(predicted_triples)} triples")
 
+    # 멀티홉 체인이면 1차 결과 tail을 저장하고 2차 hop 대기
+    if lp_chain and predictions:
+        intermediate_uri = predictions[0].get("tail", "")
+        print(f"  [1-hop] 중간 노드 저장: {intermediate_uri} → 2차 LP 대기")
+        return {
+            "target_relation": result.get("target_relation") or state.get("target_relation"),
+            "predicted_triples": predicted_triples,
+            "prediction_confidence": confidences,
+            "prediction_evidence": predictions,
+            "link_prediction_done": False,   # 아직 완료 아님
+            "lp_intermediate_node": intermediate_uri,
+            "lp_hop_index": 1,               # 다음 호출에서 2차 실행
+            "sparql_query": None,
+            "sparql_results": None,
+            "result_verification": None,
+            "workflow_path": ["link_prediction_hop1"],
+        }
+
+    # 1-hop 단일 관계 (체인 없음) 또는 1차에서 예측 실패
     return {
         "target_relation": result.get("target_relation") or state.get("target_relation"),
         "predicted_triples": predicted_triples,
@@ -391,15 +471,31 @@ def _infer_intent_from_query(query: str) -> str:
 
 def _infer_target_relation_from_query(query: str) -> Optional[str]:
     normalized = query.lower()
-    if any(word in normalized for word in ["사진", "photo", "콘텐츠", "찍은"]):
+    has_photo = any(word in normalized for word in ["사진", "photo", "콘텐츠", "찍은"])
+    has_call_after = any(word in normalized for word in ["통화", "call"]) and any(
+        word in normalized for word in ["후", "뒤", "나서", "after"]
+    )
+    has_who = any(word in normalized for word in ["누구", "만났", "만난", "met"])
+    has_call = any(word in normalized for word in ["통화", "call"])
+
+    # 2-hop 패턴 먼저 체크
+    if has_photo and has_who:
+        return "relatedEvent+metDuring"
+    if has_call_after and has_who:
+        return "visitedAfter+metDuring"
+    if has_call_after and has_photo:
+        return "visitedAfter+relatedEvent_rev"
+    if has_photo and has_call and not has_call_after:
+        return "relatedEvent+visitedAfter_rev"
+
+    # 1-hop
+    if has_photo:
         return "relatedEvent"
     if any(word in normalized for word in ["앱", "app", "notion", "slack", "gmail"]):
         return "usedDuring"
-    if any(word in normalized for word in ["누구", "만났", "만난", "met"]):
+    if has_who:
         return "metDuring"
-    if any(word in normalized for word in ["통화", "call"]) and any(
-        word in normalized for word in ["후", "뒤", "나서", "after"]
-    ):
+    if has_call_after:
         return "visitedAfter"
     return None
 

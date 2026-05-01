@@ -1,0 +1,137 @@
+[
+  {
+    "head": "http://example.org/data/call_001",
+    "relation": "http://example.org/smartphone-log#visitedAfter",
+    "tail": "http://example.org/data/visit_002",
+    "relation_name": "visitedAfter",
+    "confidence": 0.95,
+    "evidence": "통화 후 16분 뒤 같은 시간대의 투썸플레이스 강남점 방문 기록",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/call_004",
+    "relation": "http://example.org/smartphone-log#visitedAfter",
+    "tail": "http://example.org/data/visit_012",
+    "relation_name": "visitedAfter",
+    "confidence": 0.92,
+    "evidence": "통화 후 26분 뒤 같은 시간대의 스타벅스 역삼점 방문 기록",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/call_005",
+    "relation": "http://example.org/smartphone-log#visitedAfter",
+    "tail": "http://example.org/data/visit_016",
+    "relation_name": "visitedAfter",
+    "confidence": 0.75,
+    "evidence": "통화 후 81분 뒤 투썸플레이스 강남점 방문 기록 (약한 양성)",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/visit_002",
+    "relation": "http://example.org/smartphone-log#metDuring",
+    "tail": "http://example.org/data/JungSujin",
+    "relation_name": "metDuring",
+    "confidence": 0.95,
+    "evidence": "방문 16분 전 Jung Su-jin님과 통화한 기록",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/visit_012",
+    "relation": "http://example.org/smartphone-log#metDuring",
+    "tail": "http://example.org/data/JungSujin",
+    "relation_name": "metDuring",
+    "confidence": 0.92,
+    "evidence": "방문 26분 전 Jung Su-jin님과 통화한 기록",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/visit_016",
+    "relation": "http://example.org/smartphone-log#metDuring",
+    "tail": "http://example.org/data/ParkMinji",
+    "relation_name": "metDuring",
+    "confidence": 0.75,
+    "evidence": "방문 81분 전 Park Min-ji님과 통화한 기록 (약한 양성)",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/photo_001",
+    "relation": "http://example.org/smartphone-log#relatedEvent",
+    "tail": "http://example.org/data/visit_002",
+    "relation_name": "relatedEvent",
+    "confidence": 0.98,
+    "evidence": "사진 촬영 장소가 투썸플레이스 강남점이고 방문 시각과 5분 차이",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/photo_002",
+    "relation": "http://example.org/smartphone-log#relatedEvent",
+    "tail": "http://example.org/data/visit_004",
+    "relation_name": "relatedEvent",
+    "confidence": 0.97,
+    "evidence": "사진 촬영 장소가 투썸플레이스 강남점이고 방문 시각과 10분 차이",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/photo_003",
+    "relation": "http://example.org/smartphone-log#relatedEvent",
+    "tail": "http://example.org/data/visit_006",
+    "relation_name": "relatedEvent",
+    "confidence": 0.97,
+    "evidence": "사진 촬영 장소가 스타벅스 역삼점이고 방문 시각과 10분 차이",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/photo_004",
+    "relation": "http://example.org/smartphone-log#relatedEvent",
+    "tail": "http://example.org/data/visit_008",
+    "relation_name": "relatedEvent",
+    "confidence": 0.98,
+    "evidence": "사진 촬영 장소가 샐러디 역삼점이고 방문 시각과 5분 차이",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/photo_005",
+    "relation": "http://example.org/smartphone-log#relatedEvent",
+    "tail": "http://example.org/data/visit_012",
+    "relation_name": "relatedEvent",
+    "confidence": 0.98,
+    "evidence": "사진 촬영 장소가 스타벅스 역삼점이고 방문 시각과 5분 차이",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/photo_006",
+    "relation": "http://example.org/smartphone-log#relatedEvent",
+    "tail": "http://example.org/data/visit_016",
+    "relation_name": "relatedEvent",
+    "confidence": 0.98,
+    "evidence": "사진 촬영 장소가 투썸플레이스 강남점이고 방문 시각과 5분 차이",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/photo_007",
+    "relation": "http://example.org/smartphone-log#relatedEvent",
+    "tail": "http://example.org/data/visit_020",
+    "relation_name": "relatedEvent",
+    "confidence": 0.98,
+    "evidence": "사진 촬영 장소가 맥도날드 강남역점이고 방문 시각과 5분 차이",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/app_evt_012",
+    "relation": "http://example.org/smartphone-log#usedDuring",
+    "tail": "http://example.org/data/cal_002",
+    "relation_name": "usedDuring",
+    "confidence": 0.9,
+    "evidence": "디자인 리뷰 시작 64분 전 Notion 사용 기록",
+    "source": "weak_supervision"
+  },
+  {
+    "head": "http://example.org/data/app_evt_018",
+    "relation": "http://example.org/smartphone-log#usedDuring",
+    "tail": "http://example.org/data/cal_004",
+    "relation_name": "usedDuring",
+    "confidence": 0.9,
+    "evidence": "전체 회의 시작 58분 전 Notion 사용 기록",
+    "source": "weak_supervision"
+  }
+]

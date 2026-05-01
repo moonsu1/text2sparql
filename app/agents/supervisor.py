@@ -54,6 +54,24 @@ def supervisor_decide(state: Dict[str, Any]) -> Tuple[str, str]:
             f"질의에서 {', '.join(parts)}을(를) 발견했으므로 다음은 `엔티티를 추출`합니다.",
         )
 
+    lp_chain = state.get("lp_chain")
+    lp_hop_index = state.get("lp_hop_index", 0)
+    lp_intermediate_node = state.get("lp_intermediate_node")
+
+    # ── 멀티홉: 1차 LP 완료 후 2차 LP 대기 중인 경우 ────────────────────
+    # LP stage가 sparql_query/sparql_results 를 None으로 리셋하기 때문에
+    # sparql_query 체크보다 먼저 확인해야 2차 hop으로 정확히 라우팅됨
+    if (
+        lp_chain
+        and lp_hop_index == 1
+        and lp_intermediate_node
+        and not link_prediction_done
+    ):
+        return (
+            "link_prediction",
+            f"1차 예측 완료 (중간 노드: `{lp_intermediate_node.split('/')[-1]}`). `2차 링크 예측`을 수행합니다.",
+        )
+
     if not sparql_query:
         if sparql_retry_count >= MAX_SPARQL_RETRY:
             return (
@@ -79,9 +97,11 @@ def supervisor_decide(state: Dict[str, Any]) -> Tuple[str, str]:
                 issue = result_verification["issue"]
                 # 희박 관계 쿼리(visitedAfter 등)는 SPARQL 자체가 해당 관계 트리플을 직접 조회 못함
                 # → 결과가 0건(empty)일 때만 LP 트리거. 1~2건이면 다른 관계로 오히려 맞는 결과.
-                # 단, is_sparse_relation=False인 일반 쿼리는 sparse 경우에도 LP 없이 통과.
                 if issue == "empty":
-                    reasoning = "쿼리 결과가 비어있습니다. `링크 예측`으로 누락된 관계를 보강합니다."
+                    if lp_chain:
+                        reasoning = f"쿼리 결과가 비어있습니다. `{lp_chain}` 체인의 1차 `링크 예측`을 시작합니다."
+                    else:
+                        reasoning = "쿼리 결과가 비어있습니다. `링크 예측`으로 누락된 관계를 보강합니다."
                     return ("link_prediction", reasoning)
 
             if link_prediction_done and sparql_retry_count < MAX_SPARQL_RETRY:

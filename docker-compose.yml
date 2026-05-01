@@ -25,13 +25,15 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # LLM Provider 선택 (gemini | ollama)
+      # LLM Provider 선택 (gemini | ollama | openai)
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      # OpenAI 설정
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       # Gemini 설정
       - GEMINI_API_KEYS=${GEMINI_API_KEYS}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
       # Ollama 설정 (Docker container → Windows 호스트 Ollama)
-      # host.docker.internal은 Docker container에서 Windows 호스트를 가리킵니다
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5:4b-q8_0}
       - OLLAMA_NUM_PREDICT=${OLLAMA_NUM_PREDICT:-1024}
@@ -65,7 +67,7 @@ services:
       - DEFAULT_MODELS=rdf-kg-agent
       - ENABLE_SIGNUP=True
       - BYPASS_MODEL_ACCESS_CONTROL=true
-      - DEFAULT_PROMPT_SUGGESTIONS=[{"title":["Jung Su-jin 통화 후","들른 카페는?"],"content":"Jung Su-jin이랑 통화하고 나서 들른 카페 어디였지?"},{"title":["스타벅스 사진","어떤 방문 기록이랑 연결돼?"],"content":"4월 21일 스타벅스에서 찍은 사진은 어떤 방문 기록이랑 연결돼?"},{"title":["스타벅스에서","누구 만났지?"],"content":"스타벅스에서 누구 만났지?"},{"title":["디자인 리뷰 회의 전에","어떤 앱 썼지?"],"content":"디자인 리뷰 회의 전에 어떤 앱 썼지?"}]
+      - DEFAULT_PROMPT_SUGGESTIONS=[{"title":["[싱글홉 LP 🥇]","투썸 사진 연결 방문은?"],"content":"4월 17일 투썸플레이스에서 찍은 사진은 어떤 방문 기록이랑 연결돼?"},{"title":["[싱글홉 LP 🥈]","스타벅스 방문에서 누구?"],"content":"4월 21일 스타벅스 방문에서 누구 만났지?"},{"title":["[싱글홉 LP 🥉]","Jung Su-jin 통화 후 어디?"],"content":"Jung Su-jin이랑 통화하고 나서 어디 들렀어?"},{"title":["[멀티홉 LP 🥇]","투썸 사진→방문→누구?"],"content":"4월 17일 투썸플레이스에서 찍은 사진이랑 연결된 방문에서 누구 만났어?"},{"title":["[멀티홉 LP 🥈]","통화→스타벅스→누구?"],"content":"Jung Su-jin이랑 통화하고 나서 들른 스타벅스에서 누구 만났어?"},{"title":["[멀티홉 LP 🥉]","스타벅스 사진→방문→누구?"],"content":"4월 21일 스타벅스에서 찍은 사진이랑 연결된 방문에서 누구 만났지?"}]
     volumes:
       - openwebui-data:/app/backend/data
     depends_on:

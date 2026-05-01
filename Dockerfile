@@ -13,4 +13,4 @@ COPY . .
 EXPOSE 8000
 
 # Run the application
-CMD ["python", "backend/main.py"]
+CMD ["python", "-u", "backend/main.py"]

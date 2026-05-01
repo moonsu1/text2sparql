@@ -224,23 +224,29 @@ class KGModelManager:
         self._edge_type = pyg.edge_type
 
         # 4. R-GCN 모델 초기화 (sparse relation 슬롯 미리 확보)
+        # hidden_dim 128: 표현력 향상 (64→128)
+        # num_gcn_layers 3: 2-hop 이웃까지 집계
         self.model = KGLinkPredictor(
             num_nodes=n_nodes,
             num_relations=n_rels + len(RELATION_URIS),
-            hidden_dim=64,
-            num_gcn_layers=2,
+            hidden_dim=128,
+            num_gcn_layers=3,
         )
 
         # 5. 학습
+        # num_negatives 10: TransE는 다수 네거티브가 핵심 (1→10)
+        # num_epochs 300: 충분한 학습 (50→300)
+        # learning_rate 0.005: 안정적 수렴
         trainer = LinkPredictionTrainer(
             model=self.model,
             edge_index=pyg.edge_index,
             edge_type=pyg.edge_type,
-            learning_rate=0.01,
+            learning_rate=0.005,
+            margin=2.0,
         )
         triples = self.graph_builder.get_triples(pyg)
-        print(f"[KGModel] 학습 시작: {len(triples)} triples, 50 epochs")
-        trainer.train(triples, num_epochs=50, verbose=True)
+        print(f"[KGModel] 학습 시작: {len(triples)} triples, 300 epochs, negatives=10")
+        trainer.train(triples, num_epochs=300, num_negatives=10, verbose=True)
 
         # 6. 추론기 초기화 (edge_type 전달)
         self.predictor = LinkPredictor(
@@ -265,7 +271,9 @@ class KGModelManager:
                 "edge_index": pyg.edge_index,
                 "edge_type": pyg.edge_type,
                 "num_nodes": pyg.num_nodes,
-                "num_relations": self.model.num_relations,  # 로드 시 shape 불일치 방지
+                "num_relations": self.model.num_relations,
+                "hidden_dim": self.model.hidden_dim,
+                "num_gcn_layers": len(self.model.gcn_layers),
             },
             META_PATH,
         )
@@ -289,11 +297,13 @@ class KGModelManager:
 
         self._edge_type = edge_type
 
+        hidden_dim: int = meta.get("hidden_dim", 128)
+        num_gcn_layers: int = meta.get("num_gcn_layers", 3)
         self.model = KGLinkPredictor(
             num_nodes=num_nodes,
             num_relations=num_relations,
-            hidden_dim=64,
-            num_gcn_layers=2,
+            hidden_dim=hidden_dim,
+            num_gcn_layers=num_gcn_layers,
         )
         self.model.load_state_dict(torch.load(MODEL_PATH, weights_only=True))
 
