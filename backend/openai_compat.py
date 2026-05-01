@@ -22,6 +22,47 @@ from backend.routes import get_agent
 
 router = APIRouter()
 
+def _extract_last_user_query(messages: List["Message"]) -> str:
+    """마지막 user 메시지만 반환."""
+    for msg in reversed(messages):
+        if msg.role == "user":
+            return msg.content.strip()
+    return ""
+
+
+def _build_conversation_history(messages: List["Message"], max_turns: int = 3) -> Optional[str]:
+    """
+    최근 N턴 대화를 요약 텍스트로 변환.
+    현재 user 메시지(마지막)는 제외 — 이미 query로 전달됨.
+    assistant 응답은 마지막 400자만 포함 (프롬프트 절약).
+    메시지가 1개 이하면 None 반환.
+    """
+    # 마지막 user 메시지 위치 찾기
+    last_user_pos = -1
+    for i, msg in enumerate(reversed(messages)):
+        if msg.role == "user":
+            last_user_pos = len(messages) - 1 - i
+            break
+
+    if last_user_pos <= 0:
+        return None  # 이전 대화 없음
+
+    history_msgs = messages[:last_user_pos]
+    # 최근 max_turns 쌍만 사용
+    relevant = history_msgs[-(max_turns * 2):]
+
+    parts = []
+    for msg in relevant:
+        if msg.role == "user":
+            parts.append(f"사용자: {msg.content.strip()}")
+        elif msg.role == "assistant":
+            # 긴 마크다운 응답의 핵심만 추출 (마지막 400자)
+            content = msg.content.strip()
+            summary = content[-400:] if len(content) > 400 else content
+            parts.append(f"에이전트: ...{summary}")
+
+    return "\n".join(parts) if parts else None
+
 
 class Model(BaseModel):
     id: str
@@ -221,6 +262,8 @@ def _local_id(uri: str) -> str:
 def _format_prediction_summary(state: Dict[str, Any]) -> str:
     predictions = state.get("predicted_triples") or []
     evidence_items = state.get("prediction_evidence") or []
+    lp_llm_reason = state.get("lp_llm_reason")
+
     if not predictions:
         return "예측된 관계: `0`개\n\n"
 
@@ -238,6 +281,10 @@ def _format_prediction_summary(state: Dict[str, Any]) -> str:
         if evidence.get("confidence") is not None:
             lines.append(f"  confidence: `{float(evidence['confidence']):.2f}`")
         lines.append(f"  evidence: {evidence.get('evidence', '근거 없음')}")
+
+    if lp_llm_reason:
+        lines.append(f"\n🧠 **LLM 검증 근거**")
+        lines.append(f"> {lp_llm_reason}")
 
     return "\n".join(lines) + "\n\n"
 
@@ -330,6 +377,7 @@ async def stream_live_agent_response(
     agent: Any,
     user_query: str,
     chat_id: str,
+    conversation_history: Optional[str] = None,
 ) -> AsyncIterator[str]:
     model = request.model
 
@@ -346,6 +394,7 @@ async def stream_live_agent_response(
         for event in agent.stream_query_events(
             query=user_query,
             use_link_prediction=_request_use_link_prediction(request),
+            conversation_history=conversation_history,
         ):
             if event.get("type") == "supervisor_decision":
                 supervisor_index += 1
@@ -420,15 +469,25 @@ def _build_full_response_text(result: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _run_agent_full(agent: Any, user_query: str, use_link_prediction: bool) -> Dict[str, Any]:
+def _run_agent_full(
+    agent: Any,
+    user_query: str,
+    use_link_prediction: bool,
+    conversation_history: Optional[str] = None,
+) -> Dict[str, Any]:
     if not hasattr(agent, "stream_query_events"):
-        return agent.query(query=user_query, use_link_prediction=use_link_prediction)
+        return agent.query(
+            query=user_query,
+            use_link_prediction=use_link_prediction,
+            conversation_history=conversation_history,
+        )
 
     events = []
     final_result: Dict[str, Any] = {}
     for event in agent.stream_query_events(
         query=user_query,
         use_link_prediction=use_link_prediction,
+        conversation_history=conversation_history,
     ):
         events.append(event)
         if event.get("type") == "final":
@@ -442,11 +501,8 @@ def _run_agent_full(agent: Any, user_query: str, use_link_prediction: bool) -> D
 @router.post("/v1/chat/completions")
 async def openai_chat_completions(request: ChatCompletionRequest):
     try:
-        user_query = ""
-        for msg in reversed(request.messages):
-            if msg.role == "user":
-                user_query = msg.content
-                break
+        user_query = _extract_last_user_query(request.messages)
+        conversation_history = _build_conversation_history(request.messages)
 
         if not user_query:
             raise HTTPException(status_code=400, detail="No user message found")
@@ -457,7 +513,9 @@ async def openai_chat_completions(request: ChatCompletionRequest):
         if request.stream:
             if hasattr(agent, "stream_query_events"):
                 return StreamingResponse(
-                    stream_live_agent_response(request, agent, user_query, chat_id),
+                    stream_live_agent_response(
+                        request, agent, user_query, chat_id, conversation_history
+                    ),
                     media_type="text/event-stream",
                 )
 
@@ -465,6 +523,7 @@ async def openai_chat_completions(request: ChatCompletionRequest):
                 agent,
                 user_query,
                 _request_use_link_prediction(request),
+                conversation_history,
             )
             return StreamingResponse(
                 stream_response_with_progress(request, result, chat_id),
@@ -475,6 +534,7 @@ async def openai_chat_completions(request: ChatCompletionRequest):
             agent,
             user_query,
             _request_use_link_prediction(request),
+            conversation_history,
         )
         full_answer = _build_full_response_text(result)
 

@@ -132,6 +132,53 @@ WHERE {{
 ORDER BY ?callTime ?visitTime
 ```
 
+# Complete Example 3
+
+**Intent: person_timeline — "그날 Jung Su-jin 통화·일정·사진 전부 찾아줘"**
+
+```sparql
+PREFIX log: <http://example.org/smartphone-log#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?type ?time ?detail
+WHERE {{
+  {{
+    ?call a log:CallEvent ;
+          log:callee ?p ;
+          log:startedAt ?time .
+    ?p rdfs:label ?pName .
+    FILTER(CONTAINS(?pName, "Jung Su-jin"))
+    FILTER(?time >= "2026-04-17T00:00:00"^^xsd:dateTime && ?time < "2026-04-18T00:00:00"^^xsd:dateTime)
+    BIND("통화" AS ?type)
+    BIND(STR(?pName) AS ?detail)
+  }}
+  UNION
+  {{
+    ?cal a log:CalendarEvent ;
+         log:participant ?p ;
+         log:startTime ?time ;
+         log:title ?title .
+    ?p rdfs:label ?pName .
+    FILTER(CONTAINS(?pName, "Jung Su-jin"))
+    FILTER(?time >= "2026-04-17T00:00:00"^^xsd:dateTime && ?time < "2026-04-18T00:00:00"^^xsd:dateTime)
+    BIND("일정" AS ?type)
+    BIND(STR(?title) AS ?detail)
+  }}
+  UNION
+  {{
+    ?content a log:Content ;
+             log:capturedAt ?time ;
+             rdfs:label ?label .
+    OPTIONAL {{ ?content log:capturedPlace ?cp . ?cp rdfs:label ?placeLabel . }}
+    FILTER(?time >= "2026-04-17T00:00:00"^^xsd:dateTime && ?time < "2026-04-18T00:00:00"^^xsd:dateTime)
+    BIND("사진" AS ?type)
+    BIND(COALESCE(STR(?placeLabel), STR(?label)) AS ?detail)
+  }}
+}}
+ORDER BY ?time
+```
+
 # Instructions
 
 1. 사용자 질문을 분석하여 필요한 Classes와 Properties를 파악하세요

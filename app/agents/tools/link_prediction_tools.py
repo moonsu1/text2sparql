@@ -54,7 +54,7 @@ def predict_sparse_relations(state: Dict[str, Any]) -> Dict[str, Any]:
     embed_predictions = _predict_with_embedding_model(state, relation)
     if embed_predictions:
         print(f"  [LP] 임베딩 모델 예측 {len(embed_predictions)}건 (relation={relation})")
-        return {"target_relation": relation, "predictions": embed_predictions[:1]}
+        return {"target_relation": relation, "predictions": embed_predictions[:3]}
 
     # ── 2. Rule-based fallback ──────────────────────────────────────────
     print(f"  [LP] 임베딩 예측 없음 → rule-based fallback (relation={relation})")
@@ -73,7 +73,7 @@ def predict_sparse_relations(state: Dict[str, Any]) -> Dict[str, Any]:
         if p.get("confidence", 0.0) >= CONFIDENCE_THRESHOLD
     ]
 
-    return {"target_relation": relation, "predictions": predictions[:1]}
+    return {"target_relation": relation, "predictions": predictions[:3]}
 
 
 # ── 임베딩 모델 예측 ────────────────────────────────────────────────────────
@@ -552,7 +552,7 @@ def _rule_based_second_hop(
                 timestamps={"callTime": row.get("callTime"),
                             "visitTime": visit_rows[0].get("visitTime")},
             ))
-        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:1]
+        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:3]
 
     if base_relation == "relatedEvent" and is_reverse:
         # VisitEvent ← Content: 같은 장소·시각대 사진 탐색
@@ -606,7 +606,7 @@ def _rule_based_second_hop(
                 timestamps={"capturedAt": row.get("capturedAt"),
                             "visitTime": visit_rows[0].get("visitTime")},
             ))
-        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:1]
+        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:3]
 
     if base_relation == "visitedAfter" and is_reverse:
         # VisitEvent ← CallEvent: 방문 직전 통화 탐색
@@ -654,9 +654,43 @@ def _rule_based_second_hop(
                 timestamps={"callTime": row.get("callTime"),
                             "visitTime": visit_rows[0].get("visitTime")},
             ))
-        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:1]
+        return sorted(results, key=lambda x: x.get("confidence", 0), reverse=True)[:3]
 
     return []
+
+
+def fetch_candidate_context(
+    predictions: List[Dict[str, Any]],
+    state: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """
+    각 예측 후보에 Fuseki 실제 데이터를 조회해 컨텍스트 텍스트를 추가.
+
+    Returns:
+        predictions 리스트에 "fuseki_context" 키가 추가된 사본
+    """
+    enriched = []
+    for pred in predictions:
+        parts = []
+
+        tail_label = pred.get("tail_label")
+        if tail_label:
+            parts.append(f"대상: {tail_label}")
+
+        ts = pred.get("timestamps") or {}
+        for key, val in ts.items():
+            if val:
+                dt = _parse_datetime(val)
+                if dt:
+                    parts.append(f"{key}: {dt.strftime('%Y-%m-%d %H:%M')}")
+
+        evidence_text = pred.get("evidence", "")
+        if evidence_text:
+            parts.append(f"근거: {evidence_text}")
+
+        enriched.append({**pred, "fuseki_context": " | ".join(parts)})
+
+    return enriched
 
 
 def predict_visited_after(state: Dict[str, Any]) -> List[Dict[str, Any]]:

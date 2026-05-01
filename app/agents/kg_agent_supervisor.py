@@ -11,7 +11,7 @@ Supervisor(rule-based)가 매 단계마다 상황을 보고 다음 stage 결정 
 
 import sys
 from pathlib import Path
-from typing import Dict, Any, Iterator, List
+from typing import Dict, Any, Iterator, List, Optional
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
@@ -125,6 +125,7 @@ class KGAgentSupervisor:
         query: str,
         use_link_prediction: bool,
         initial_result: Dict[str, Any],
+        conversation_history: Optional[str] = None,
     ) -> Dict[str, Any]:
         """질의 분석 결과를 LangGraph 초기 state로 변환"""
         # query_analysis_stage가 target_relation으로 LP 필요성을 판단한 경우 우선 적용
@@ -155,6 +156,10 @@ class KGAgentSupervisor:
             "lp_chain": initial_result.get("lp_chain"),
             "lp_hop_index": initial_result.get("lp_hop_index", 0),
             "lp_intermediate_node": initial_result.get("lp_intermediate_node"),
+            "lp_llm_reason": None,
+
+            # Conversation Context
+            "conversation_history": conversation_history,
 
             # 나머지 초기화
             "is_sparse": False,
@@ -191,6 +196,7 @@ class KGAgentSupervisor:
             "predicted_triples": final_state.get("predicted_triples", []),
             "prediction_confidence": final_state.get("prediction_confidence", []),
             "prediction_evidence": final_state.get("prediction_evidence", []),
+            "lp_llm_reason": final_state.get("lp_llm_reason"),
             "result_verification": final_state.get("result_verification"),
             "error": final_state.get("error"),
         }
@@ -236,22 +242,29 @@ class KGAgentSupervisor:
 
         return next_state
 
-    def _run_query_analysis(self, query: str, use_link_prediction: bool) -> Dict[str, Any]:
+    def _run_query_analysis(
+        self,
+        query: str,
+        use_link_prediction: bool,
+        conversation_history: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """첫 번째 고정 단계인 질의 분석 실행"""
         print("=" * 70)
-        print(f"[KG Supervisor Agent] Query: {query}")
+        print(f"[KG Supervisor Agent] Query: {query[:80]}")
         print("=" * 70)
 
         # ── 질의 분석 (첫 번째 고정 단계) ──────────────────
         return query_analysis_stage({
             "query": query,
             "use_link_prediction": use_link_prediction,
+            "conversation_history": conversation_history,
         })
 
     def stream_query_events(
         self,
         query: str,
         use_link_prediction: bool = False,
+        conversation_history: Optional[str] = None,
     ) -> Iterator[Dict[str, Any]]:
         """
         LangGraph 실행 중 상태 변화를 이벤트로 스트리밍.
@@ -267,7 +280,9 @@ class KGAgentSupervisor:
                 {"type": "stage_start", "stage": "query_analysis"},
             )
 
-            initial_result = self._run_query_analysis(query, use_link_prediction)
+            initial_result = self._run_query_analysis(
+                query, use_link_prediction, conversation_history
+            )
 
             yield self._emit_event(
                 execution_events,
@@ -282,6 +297,7 @@ class KGAgentSupervisor:
                 query=query,
                 use_link_prediction=use_link_prediction,
                 initial_result=initial_result,
+                conversation_history=conversation_history,
             )
 
             final_state: Dict[str, Any] = initial_state
@@ -405,15 +421,23 @@ class KGAgentSupervisor:
                 },
             )
 
-    def query(self, query: str, use_link_prediction: bool = False) -> Dict[str, Any]:
+    def query(
+        self,
+        query: str,
+        use_link_prediction: bool = False,
+        conversation_history: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """사용자 질의 실행"""
-        initial_result = self._run_query_analysis(query, use_link_prediction)
+        initial_result = self._run_query_analysis(
+            query, use_link_prediction, conversation_history
+        )
 
         # ── 초기 State ──────────────────────────────────────
         initial_state = self._build_initial_state(
             query=query,
             use_link_prediction=use_link_prediction,
             initial_result=initial_result,
+            conversation_history=conversation_history,
         )
         
         # ── Supervisor Workflow 실행 ──────────────────────

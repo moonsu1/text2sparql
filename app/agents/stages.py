@@ -25,6 +25,7 @@ from app.agents.tools.execution_tools import execute_sparql_on_fuseki, verify_re
 from app.agents.tools.link_prediction_tools import (
     predict_sparse_relations,
     predict_second_hop,
+    fetch_candidate_context,
     MULTIHOP_CHAINS,
 )
 from app.agents.tools.sparql_tools import generate_sparql, verify_sparql_syntax
@@ -36,13 +37,24 @@ def query_analysis_stage(state: AgentState) -> Dict[str, Any]:
 
     query = state["query"]
 
+    conversation_history = state.get("conversation_history") or ""
+
+    # 대화 히스토리 섹션 구성 (있을 때만 추가)
+    history_section = ""
+    if conversation_history:
+        history_section = (
+            f"\n[이전 대화 컨텍스트]\n{conversation_history}\n"
+            "※ 현재 질의가 모호하거나 짧은 경우, 이전 대화를 참고해 의도를 파악하세요.\n"
+        )
+
     analysis_prompt = f"""
 다음 질의를 JSON으로 분석하세요.
-
+{history_section}
 질의: "{query}"
 
 필드:
-1. intent: recent_calls, most_used_app, visited_places, call_after_cafe, meeting_location, photos_at_place, sparse_completion 중 하나
+1. intent: recent_calls, most_used_app, visited_places, call_after_cafe, meeting_location, photos_at_place, sparse_completion, person_timeline 중 하나
+   - person_timeline: 특정 인물의 특정 날짜 전체 활동(통화·일정·사진 등)을 종합 조회할 때
 2. target_relation: visitedAfter, metDuring, relatedEvent, usedDuring 중 하나. 없으면 null
 3. time_constraint: 어제, 최근, 지난주 등 상대 시간. 없으면 null
 4. person_mention: 언급된 사람 이름. 없으면 null
@@ -266,12 +278,91 @@ def execution_stage(state: AgentState) -> Dict[str, Any]:
     }
 
 
+def _llm_verify_lp_candidates(
+    candidates: list,
+    state: AgentState,
+) -> tuple:
+    """
+    R-GCN+TransE top-K 후보 중 LLM이 문맥에 맞는 최종 후보를 선택.
+
+    Returns:
+        (selected_candidate, reason_text)
+        후보가 1개이하거나 LLM 실패 시 confidence 최고 후보 반환.
+    """
+    if not candidates:
+        return None, ""
+    if len(candidates) == 1:
+        return candidates[0], ""
+
+    candidates_text = ""
+    for i, c in enumerate(candidates):
+        ts = c.get("timestamps") or {}
+        ts_parts = []
+        for k, v in ts.items():
+            if v:
+                from app.agents.tools.link_prediction_tools import _parse_datetime
+                dt = _parse_datetime(v)
+                if dt:
+                    ts_parts.append(f"{k}: {dt.strftime('%Y-%m-%d %H:%M')}")
+        ts_str = " | ".join(ts_parts) if ts_parts else "시간 정보 없음"
+        candidates_text += (
+            f"\n후보 {i + 1}: {c.get('tail_label', c.get('tail_id', '?'))} "
+            f"(confidence: {c.get('confidence', 0):.2f})\n"
+            f"  {ts_str}\n"
+            f"  근거: {c.get('evidence', '없음')}\n"
+        )
+
+    time_info = ""
+    tc = state.get("time_constraint")
+    if isinstance(tc, dict):
+        time_info = tc.get("date") or tc.get("word") or ""
+    elif isinstance(tc, str):
+        time_info = tc
+
+    prompt = (
+        f'사용자 질의: "{state.get("query", "")}"\n'
+        f"시간 조건: {time_info or '없음'}\n"
+        f"장소 조건: {state.get('place_keyword', '없음')}\n\n"
+        f"R-GCN+TransE 모델 예측 후보:\n{candidates_text}\n"
+        "질의 문맥(시간·장소)에 가장 타당한 후보 번호를 선택하고 이유를 한 문장으로 설명하세요.\n"
+        'JSON만 출력: {"selected_index": 0, "reason": "..."}\n'
+        "(selected_index는 0-based)"
+    )
+
+    try:
+        result = call_llm(
+            system_prompt=(
+                "당신은 KG 링크 예측 검증 전문가입니다. "
+                "사용자 질의 문맥과 시간/장소 정보를 기반으로 가장 타당한 후보를 선택합니다."
+            ),
+            user_prompt=prompt,
+            temperature=0.1,
+        )
+        parsed = _parse_json_safe(result)
+        selected_idx = parsed.get("selected_index", 0)
+        reason = parsed.get("reason", "")
+
+        if not isinstance(selected_idx, int) or selected_idx < 0 or selected_idx >= len(candidates):
+            selected_idx = 0
+
+        selected = candidates[selected_idx]
+        print(
+            f"  [LLM-verify] 후보 {selected_idx + 1}/{len(candidates)} 선택: "
+            f"'{selected.get('tail_label')}' | {reason[:80]}"
+        )
+        return selected, reason
+
+    except Exception as e:
+        print(f"  [LLM-verify] 실패 → confidence 최고 후보 사용: {e}")
+        return candidates[0], ""
+
+
 def link_prediction_stage(state: AgentState) -> Dict[str, Any]:
     """Complete sparse relations from observed temporal/place/person evidence.
 
     멀티홉 체인인 경우:
-    - lp_hop_index == 0: 1차 LP 수행, 결과 tail을 lp_intermediate_node에 저장
-    - lp_hop_index == 1: lp_intermediate_node를 head로 2차 LP 수행, link_prediction_done=True
+    - lp_hop_index == 0: 1차 LP → top-K 후보 LLM 검증 → 선택된 tail을 lp_intermediate_node에 저장
+    - lp_hop_index == 1: lp_intermediate_node를 head로 2차 LP → LLM 검증 → link_prediction_done=True
     """
     print("\n[STAGE] Link Prediction")
 
@@ -284,19 +375,22 @@ def link_prediction_stage(state: AgentState) -> Dict[str, Any]:
         second_relation = MULTIHOP_CHAINS[lp_chain][1]
         print(f"  [2-hop] 2차 예측 시작: chain={lp_chain}, relation={second_relation}, head={lp_intermediate_node}")
 
-        predictions = predict_second_hop(state, lp_intermediate_node, second_relation)
-        predicted_triples = [
-            (p["head"], p["relation"], p["tail"])
-            for p in predictions
-        ]
-        confidences = [p["confidence"] for p in predictions]
+        raw_predictions = predict_second_hop(state, lp_intermediate_node, second_relation)
+        enriched = fetch_candidate_context(raw_predictions, state)
 
-        print(f"  [2-hop] 2차 예측 결과: {len(predicted_triples)}건")
+        selected, reason = _llm_verify_lp_candidates(enriched, state)
+        final_predictions = [selected] if selected else (enriched[:1] if enriched else [])
+
+        predicted_triples = [(p["head"], p["relation"], p["tail"]) for p in final_predictions]
+        confidences = [p["confidence"] for p in final_predictions]
+
+        print(f"  [2-hop] 2차 최종 선택: {len(final_predictions)}건")
 
         return {
             "predicted_triples": predicted_triples,
             "prediction_confidence": confidences,
-            "prediction_evidence": predictions,
+            "prediction_evidence": final_predictions,
+            "lp_llm_reason": reason or None,
             "link_prediction_done": True,
             "lp_hop_index": 2,
             "sparql_query": None,
@@ -307,29 +401,31 @@ def link_prediction_stage(state: AgentState) -> Dict[str, Any]:
 
     # ── 1차 hop (1-hop 단일 관계 또는 멀티홉 1차) ─────────────────────
     result = predict_sparse_relations(state)
-    predictions = result.get("predictions", [])
+    raw_predictions = result.get("predictions", [])
+    enriched = fetch_candidate_context(raw_predictions, state)
 
-    predicted_triples = [
-        (p["head"], p["relation"], p["tail"])
-        for p in predictions
-    ]
-    confidences = [p["confidence"] for p in predictions]
+    selected, reason = _llm_verify_lp_candidates(enriched, state)
+    final_predictions = [selected] if selected else (enriched[:1] if enriched else [])
+
+    predicted_triples = [(p["head"], p["relation"], p["tail"]) for p in final_predictions]
+    confidences = [p["confidence"] for p in final_predictions]
 
     print(f"  Target relation: {result.get('target_relation')}")
-    print(f"  Predictions: {len(predicted_triples)} triples")
+    print(f"  Candidates: {len(enriched)}건 → LLM 선택: {len(final_predictions)}건")
 
     # 멀티홉 체인이면 1차 결과 tail을 저장하고 2차 hop 대기
-    if lp_chain and predictions:
-        intermediate_uri = predictions[0].get("tail", "")
-        print(f"  [1-hop] 중간 노드 저장: {intermediate_uri} → 2차 LP 대기")
+    if lp_chain and final_predictions:
+        intermediate_uri = final_predictions[0].get("tail", "")
+        print(f"  [1-hop] LLM 검증 완료. 중간 노드 저장: {intermediate_uri} → 2차 LP 대기")
         return {
             "target_relation": result.get("target_relation") or state.get("target_relation"),
             "predicted_triples": predicted_triples,
             "prediction_confidence": confidences,
-            "prediction_evidence": predictions,
-            "link_prediction_done": False,   # 아직 완료 아님
+            "prediction_evidence": final_predictions,
+            "lp_llm_reason": reason or None,
+            "link_prediction_done": False,
             "lp_intermediate_node": intermediate_uri,
-            "lp_hop_index": 1,               # 다음 호출에서 2차 실행
+            "lp_hop_index": 1,
             "sparql_query": None,
             "sparql_results": None,
             "result_verification": None,
@@ -341,7 +437,8 @@ def link_prediction_stage(state: AgentState) -> Dict[str, Any]:
         "target_relation": result.get("target_relation") or state.get("target_relation"),
         "predicted_triples": predicted_triples,
         "prediction_confidence": confidences,
-        "prediction_evidence": predictions,
+        "prediction_evidence": final_predictions,
+        "lp_llm_reason": reason or None,
         "link_prediction_done": True,
         "sparql_query": None,
         "sparql_results": None,

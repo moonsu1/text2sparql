@@ -43,6 +43,12 @@ class AgentState(TypedDict):
     lp_chain: Optional[str]          # 체인 식별자 (예: "relatedEvent+metDuring"), None이면 1-hop
     lp_hop_index: int                 # 현재 실행 중인 hop 번호 (0=1차, 1=2차)
     lp_intermediate_node: Optional[str]  # 1차 예측 tail URI → 2차 LP의 head
+
+    # LLM Hybrid Verification
+    lp_llm_reason: Optional[str]     # LLM이 최종 후보를 선택한 근거 텍스트
+
+    # Conversation Context (multi-turn)
+    conversation_history: Optional[str]  # 이전 대화 요약 (user+assistant 교환)
     
     # SPARQL Generation
     sparql_query: Optional[str]
