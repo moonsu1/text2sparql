@@ -76,6 +76,8 @@ def test_stream_query_events_emits_decision_before_stage_complete(monkeypatch):
 
 
 def test_stream_query_events_streams_answer_tokens(monkeypatch):
+    recorded = {}
+
     def fake_query_analysis_stage(state):
         return {
             "intent": "recent_calls",
@@ -98,16 +100,22 @@ def test_stream_query_events_streams_answer_tokens(monkeypatch):
         "build_answer_generation_prompt",
         lambda state: ("system", "user"),
     )
-    monkeypatch.setattr(
-        supervisor_module,
-        "call_llm_stream",
-        lambda **kwargs: iter(["안녕하세요", "!"]),
-    )
+
+    def fake_call_llm_stream(**kwargs):
+        recorded["llm_config"] = kwargs.get("llm_config")
+        return iter(["안녕하세요", "!"])
+
+    monkeypatch.setattr(supervisor_module, "call_llm_stream", fake_call_llm_stream)
 
     agent = KGAgentSupervisor.__new__(KGAgentSupervisor)
     agent.app = FakeAnswerCompiledGraph()
 
-    events = list(agent.stream_query_events("답변 테스트"))
+    events = list(
+        agent.stream_query_events(
+            "답변 테스트",
+            llm_config={"provider": "openai", "model_alias": "kg-openai"},
+        )
+    )
     event_keys = [
         (event.get("type"), event.get("stage"), event.get("next_stage"))
         for event in events
@@ -126,3 +134,4 @@ def test_stream_query_events_streams_answer_tokens(monkeypatch):
     assert events[-1]["type"] == "final"
     assert events[-1]["result"]["answer"] == "안녕하세요!"
     assert events[-1]["result"]["sources"] == ["call_001"]
+    assert recorded["llm_config"] == {"provider": "openai", "model_alias": "kg-openai"}

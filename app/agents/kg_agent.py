@@ -5,7 +5,7 @@ RDF Knowledge Graph 기반 QA Agent
 
 import sys
 from pathlib import Path
-from typing import Literal, Dict
+from typing import Literal, Dict, Optional, Any
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
@@ -70,8 +70,15 @@ class KGAgent:
         
         return workflow
     
-    def query(self, query: str, use_link_prediction: bool = False) -> Dict:
+    def query(
+        self,
+        query: str,
+        use_link_prediction: bool = False,
+        conversation_history: Optional[str] = None,
+        llm_config: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         """사용자 질의 실행"""
+        del conversation_history  # legacy workflow ignores conversation state
         
         print("=" * 70)
         print(f"[KG Agent] Query: {query}")
@@ -82,10 +89,12 @@ class KGAgent:
             "query": query,
             "session_id": None,
             "use_link_prediction": use_link_prediction,
+            "llm_config": llm_config,
             "intent": None,
             "target_relation": None,
             "entities": {},
             "time_constraint": None,
+            "conversation_history": None,
             "is_sparse": False,
             "missing_relations": [],
             "sparse_score": 1.0,

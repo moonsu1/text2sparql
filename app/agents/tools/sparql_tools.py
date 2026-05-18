@@ -32,6 +32,7 @@ def generate_sparql(
     prediction_confidence: Optional[List[float]] = None,
     prediction_evidence: Optional[List[Dict[str, Any]]] = None,
     target_relation: Optional[str] = None,
+    llm_config: Optional[Dict[str, str]] = None,
 ) -> tuple[str, Optional[str]]:
     """
     Generate SPARQL (and optionally a Mermaid graph).
@@ -68,6 +69,7 @@ def generate_sparql(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.1,
+        llm_config=llm_config,
     )
 
     sparql_query = _extract_sparql(llm_result)

@@ -1,8 +1,13 @@
+import asyncio
+
 from backend.openai_compat import (
     ChatCompletionRequest,
     Message,
     _request_use_link_prediction,
+    _resolve_request_llm_config,
+    _supported_model_ids,
     format_agent_event_for_markdown,
+    list_models,
 )
 from app.agents.tools import link_prediction_tools as lpt
 from app.agents.tools.sparql_tools import generate_sparql
@@ -22,6 +27,38 @@ def test_openai_link_prediction_defaults_to_true_and_can_be_disabled():
     assert _request_use_link_prediction(_request()) is True
     assert _request_use_link_prediction(_request(False)) is False
     assert _request_use_link_prediction(_request(True)) is True
+
+
+def test_openai_supported_model_ids_include_provider_aliases():
+    assert _supported_model_ids() == [
+        "rdf-kg-agent",
+        "kg-gemini",
+        "kg-openai",
+        "kg-qwen",
+    ]
+
+
+def test_openai_model_alias_resolution_and_unknown_fallback():
+    assert _resolve_request_llm_config("rdf-kg-agent") is None
+    assert _resolve_request_llm_config("kg-gemini") == {
+        "provider": "gemini",
+        "model_alias": "kg-gemini",
+    }
+    assert _resolve_request_llm_config("kg-openai") == {
+        "provider": "openai",
+        "model_alias": "kg-openai",
+    }
+    assert _resolve_request_llm_config("kg-qwen") == {
+        "provider": "ollama",
+        "model_alias": "kg-qwen",
+    }
+    assert _resolve_request_llm_config("unknown-model") is None
+
+
+def test_openai_models_endpoint_lists_all_aliases():
+    response = asyncio.run(list_models())
+    ids = [model.id for model in response.data]
+    assert ids == ["rdf-kg-agent", "kg-gemini", "kg-openai", "kg-qwen"]
 
 
 def test_relation_predictors_use_current_ontology_predicates(monkeypatch):
@@ -190,7 +227,7 @@ def test_formatter_outputs_prediction_evidence_once():
 
 
 def test_predicted_sparql_uses_values_not_persistent_edges():
-    sparql = generate_sparql(
+    sparql, mermaid = generate_sparql(
         query="Jung Su-jin이랑 통화하고 나서 들른 카페 어디였지?",
         intent="sparse_completion",
         entities_text="person: Jung Su-jin",
@@ -215,6 +252,7 @@ def test_predicted_sparql_uses_values_not_persistent_edges():
         target_relation="visitedAfter",
     )
 
+    assert mermaid is None
     assert "VALUES (?call ?visit ?confidence ?evidence)" in sparql
     assert "log:visitedAfter" not in sparql
     assert "log:callee" in sparql

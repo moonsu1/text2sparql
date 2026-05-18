@@ -78,6 +78,7 @@ JSON만 출력하세요:
         system_prompt="당신은 스마트폰 로그 질의 분석 전문가입니다.",
         user_prompt=analysis_prompt,
         temperature=0.1,
+        llm_config=state.get("llm_config"),
     )
 
     analysis = _parse_json_safe(result)
@@ -234,6 +235,7 @@ def sparql_generation_stage(state: AgentState) -> Dict[str, Any]:
         prediction_confidence=state.get("prediction_confidence") or None,
         prediction_evidence=state.get("prediction_evidence") or None,
         target_relation=state.get("target_relation"),
+        llm_config=state.get("llm_config"),
     )
 
     validation = verify_sparql_syntax(sparql_query)
@@ -337,6 +339,7 @@ def _llm_verify_lp_candidates(
             ),
             user_prompt=prompt,
             temperature=0.1,
+            llm_config=state.get("llm_config"),
         )
         parsed = _parse_json_safe(result)
         selected_idx = parsed.get("selected_index", 0)
@@ -457,6 +460,7 @@ def answer_generation_stage(state: AgentState) -> Dict[str, Any]:
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.5,
+        llm_config=state.get("llm_config"),
     )
 
     sources = collect_answer_sources(state.get("sparql_results") or [])

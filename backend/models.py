@@ -33,3 +33,27 @@ class HealthResponse(BaseModel):
     version: str
     rdf_triples: int
     message: Optional[str] = None
+
+
+class LinkPredictRequest(BaseModel):
+    """Link prediction request"""
+    head_uri: str = Field(..., description="Head entity URI")
+    relation: str = Field(..., description="Relation name to predict over")
+    top_k: int = Field(3, description="Maximum number of candidates to return", ge=1, le=10)
+    node_type_filter: Optional[str] = Field(None, description="Optional tail URI/type filter")
+
+
+class LinkPredictionItem(BaseModel):
+    """Single link prediction result"""
+    tail_uri: str = Field(..., description="Predicted tail entity URI")
+    confidence: float = Field(..., description="Relative softmax confidence among returned candidates")
+
+
+class LinkPredictResponse(BaseModel):
+    """Link prediction response"""
+    head_uri: str = Field(..., description="Head entity URI")
+    relation: str = Field(..., description="Relation name used for prediction")
+    predictions: List[LinkPredictionItem] = Field(default_factory=list, description="Predicted tail candidates")
+    model_ready: bool = Field(..., description="Whether the LP backend model is ready")
+    node_type_filter: Optional[str] = Field(None, description="Applied tail filter")
+    error: Optional[str] = Field(None, description="Error message if prediction failed")

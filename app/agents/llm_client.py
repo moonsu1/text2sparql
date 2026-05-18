@@ -11,7 +11,7 @@ import time
 import re
 import json
 import requests
-from typing import Iterator
+from typing import Iterator, Optional, TypedDict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,6 +21,13 @@ _gemini_key_index = 0
 _exhausted_keys: dict = {}
 
 
+class LLMRequestConfig(TypedDict, total=False):
+    """Request-scoped LLM override config."""
+
+    provider: str
+    model_alias: str
+
+
 # ═══════════════════════════════════════════════════════════
 # Provider 선택
 # ═══════════════════════════════════════════════════════════
@@ -28,6 +35,73 @@ _exhausted_keys: dict = {}
 def _get_provider() -> str:
     """현재 LLM_PROVIDER 반환 ('gemini', 'ollama', 'openai')"""
     return os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    normalized = (provider or "").strip().lower()
+    if normalized in {"ollama", "qwen", "local"}:
+        return "ollama"
+    if normalized == "openai":
+        return "openai"
+    return "gemini"
+
+
+def _provider_model_name(provider: str) -> str:
+    if provider == "ollama":
+        return _get_ollama_model()
+    if provider == "openai":
+        return _get_openai_model()
+    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+
+def _resolve_effective_provider(llm_config: Optional[LLMRequestConfig]) -> str:
+    if llm_config and llm_config.get("provider"):
+        return _normalize_provider(llm_config["provider"])
+    return _normalize_provider(_get_provider())
+
+
+def _has_request_override(llm_config: Optional[LLMRequestConfig]) -> bool:
+    return bool(llm_config and llm_config.get("provider"))
+
+
+def _should_attempt_default_fallback(
+    requested_provider: str,
+    default_provider: str,
+    llm_config: Optional[LLMRequestConfig],
+) -> bool:
+    return _has_request_override(llm_config) and requested_provider != default_provider
+
+
+def _is_error_response(text: Optional[str]) -> bool:
+    return not text or str(text).startswith("[ERROR]")
+
+
+def _call_provider(
+    provider: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+) -> str:
+    if provider == "ollama":
+        return _call_ollama(system_prompt, user_prompt, temperature)
+    if provider == "openai":
+        return _call_openai(system_prompt, user_prompt, temperature)
+    return _call_gemini(system_prompt, user_prompt, temperature)
+
+
+def _call_provider_stream(
+    provider: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+) -> Iterator[str]:
+    if provider == "ollama":
+        yield from _call_ollama_stream(system_prompt, user_prompt, temperature)
+        return
+    if provider == "openai":
+        yield from _call_openai_stream(system_prompt, user_prompt, temperature)
+        return
+    yield from _call_gemini_stream(system_prompt, user_prompt, temperature)
 
 
 def _get_openai_key() -> str:
@@ -472,6 +546,7 @@ def call_llm(
     user_prompt: str,
     temperature: float = None,
     max_retries: int = None,
+    llm_config: Optional[LLMRequestConfig] = None,
 ) -> str:
     """
     LLM 호출 (blocking).
@@ -480,19 +555,34 @@ def call_llm(
     if temperature is None:
         temperature = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 
-    provider = _get_provider()
-    print(f"  [llm] provider={provider}", end="")
+    del max_retries  # retained for backward compatibility
 
-    if provider in ("ollama", "qwen", "local"):
-        print(f" model={_get_ollama_model()}")
-        return _call_ollama(system_prompt, user_prompt, temperature)
+    default_provider = _normalize_provider(_get_provider())
+    requested_provider = _resolve_effective_provider(llm_config)
+    alias = (llm_config or {}).get("model_alias", "rdf-kg-agent")
 
-    if provider == "openai":
-        print(f" model={_get_openai_model()}")
-        return _call_openai(system_prompt, user_prompt, temperature)
+    if _has_request_override(llm_config):
+        print(
+            f"  [llm] default_provider={default_provider} "
+            f"request_provider={requested_provider} alias={alias} "
+            f"model={_provider_model_name(requested_provider)}"
+        )
+    else:
+        print(f"  [llm] provider={requested_provider} model={_provider_model_name(requested_provider)}")
 
-    print(f" model={os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')}")
-    return _call_gemini(system_prompt, user_prompt, temperature)
+    result = _call_provider(requested_provider, system_prompt, user_prompt, temperature)
+    if not _is_error_response(result):
+        return result
+
+    if not _should_attempt_default_fallback(requested_provider, default_provider, llm_config):
+        return result
+
+    print(
+        f"  [llm] request override failed for alias={alias}; "
+        f"fallback -> default provider={default_provider} "
+        f"model={_provider_model_name(default_provider)}"
+    )
+    return _call_provider(default_provider, system_prompt, user_prompt, temperature)
 
 
 def call_llm_stream(
@@ -500,6 +590,7 @@ def call_llm_stream(
     user_prompt: str,
     temperature: float = None,
     max_retries: int = None,
+    llm_config: Optional[LLMRequestConfig] = None,
 ) -> Iterator[str]:
     """
     LLM 스트리밍 호출.
@@ -508,14 +599,62 @@ def call_llm_stream(
     if temperature is None:
         temperature = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 
-    provider = _get_provider()
+    del max_retries  # retained for backward compatibility
 
-    if provider in ("ollama", "qwen", "local"):
-        yield from _call_ollama_stream(system_prompt, user_prompt, temperature)
+    default_provider = _normalize_provider(_get_provider())
+    requested_provider = _resolve_effective_provider(llm_config)
+    alias = (llm_config or {}).get("model_alias", "rdf-kg-agent")
+
+    if _has_request_override(llm_config):
+        print(
+            f"  [llm-stream] default_provider={default_provider} "
+            f"request_provider={requested_provider} alias={alias} "
+            f"model={_provider_model_name(requested_provider)}"
+        )
+
+    primary_stream = _call_provider_stream(
+        requested_provider,
+        system_prompt,
+        user_prompt,
+        temperature,
+    )
+
+    if not _should_attempt_default_fallback(requested_provider, default_provider, llm_config):
+        yield from primary_stream
         return
 
-    if provider == "openai":
-        yield from _call_openai_stream(system_prompt, user_prompt, temperature)
+    yielded_any = False
+    for delta in primary_stream:
+        if not delta:
+            continue
+        if not yielded_any and _is_error_response(delta):
+            print(
+                f"  [llm-stream] request override failed before first token for alias={alias}; "
+                f"fallback -> default provider={default_provider} "
+                f"model={_provider_model_name(default_provider)}"
+            )
+            yield from _call_provider_stream(
+                default_provider,
+                system_prompt,
+                user_prompt,
+                temperature,
+            )
+            return
+
+        yielded_any = True
+        yield delta
+
+    if yielded_any:
         return
 
-    yield from _call_gemini_stream(system_prompt, user_prompt, temperature)
+    print(
+        f"  [llm-stream] request override produced no tokens for alias={alias}; "
+        f"fallback -> default provider={default_provider} "
+        f"model={_provider_model_name(default_provider)}"
+    )
+    yield from _call_provider_stream(
+        default_provider,
+        system_prompt,
+        user_prompt,
+        temperature,
+    )

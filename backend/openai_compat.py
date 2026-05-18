@@ -22,6 +22,34 @@ from backend.routes import get_agent
 
 router = APIRouter()
 
+
+MODEL_ALIAS_CONFIGS: Dict[str, Dict[str, str]] = {
+    "kg-gemini": {"provider": "gemini", "model_alias": "kg-gemini"},
+    "kg-openai": {"provider": "openai", "model_alias": "kg-openai"},
+    "kg-qwen": {"provider": "ollama", "model_alias": "kg-qwen"},
+}
+DEFAULT_MODEL_ALIAS = "rdf-kg-agent"
+
+
+def _supported_model_ids() -> List[str]:
+    return [DEFAULT_MODEL_ALIAS, *MODEL_ALIAS_CONFIGS.keys()]
+
+
+def _resolve_request_llm_config(model_id: str) -> Optional[Dict[str, str]]:
+    if not model_id or model_id == DEFAULT_MODEL_ALIAS:
+        return None
+
+    config = MODEL_ALIAS_CONFIGS.get(model_id)
+    if config:
+        return dict(config)
+
+    print(
+        f"[OpenAICompat] Unknown model '{model_id}' -> "
+        f"fallback to default alias '{DEFAULT_MODEL_ALIAS}'",
+        flush=True,
+    )
+    return None
+
 def _extract_last_user_query(messages: List["Message"]) -> str:
     """마지막 user 메시지만 반환."""
     for msg in reversed(messages):
@@ -82,11 +110,12 @@ async def list_models():
         object="list",
         data=[
             Model(
-                id="rdf-kg-agent",
+                id=model_id,
                 object="model",
                 created=int(time.time()),
                 owned_by="rdf-kg-system",
             )
+            for model_id in _supported_model_ids()
         ],
     )
 
@@ -378,6 +407,7 @@ async def stream_live_agent_response(
     user_query: str,
     chat_id: str,
     conversation_history: Optional[str] = None,
+    llm_config: Optional[Dict[str, str]] = None,
 ) -> AsyncIterator[str]:
     model = request.model
 
@@ -395,6 +425,7 @@ async def stream_live_agent_response(
             query=user_query,
             use_link_prediction=_request_use_link_prediction(request),
             conversation_history=conversation_history,
+            llm_config=llm_config,
         ):
             if event.get("type") == "supervisor_decision":
                 supervisor_index += 1
@@ -474,12 +505,14 @@ def _run_agent_full(
     user_query: str,
     use_link_prediction: bool,
     conversation_history: Optional[str] = None,
+    llm_config: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     if not hasattr(agent, "stream_query_events"):
         return agent.query(
             query=user_query,
             use_link_prediction=use_link_prediction,
             conversation_history=conversation_history,
+            llm_config=llm_config,
         )
 
     events = []
@@ -488,6 +521,7 @@ def _run_agent_full(
         query=user_query,
         use_link_prediction=use_link_prediction,
         conversation_history=conversation_history,
+        llm_config=llm_config,
     ):
         events.append(event)
         if event.get("type") == "final":
@@ -509,12 +543,19 @@ async def openai_chat_completions(request: ChatCompletionRequest):
 
         agent = get_agent()
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+        llm_config = _resolve_request_llm_config(request.model)
+        if llm_config:
+            print(
+                f"[OpenAICompat] Request model alias={request.model} "
+                f"-> provider override={llm_config.get('provider')}",
+                flush=True,
+            )
 
         if request.stream:
             if hasattr(agent, "stream_query_events"):
                 return StreamingResponse(
                     stream_live_agent_response(
-                        request, agent, user_query, chat_id, conversation_history
+                        request, agent, user_query, chat_id, conversation_history, llm_config
                     ),
                     media_type="text/event-stream",
                 )
@@ -524,6 +565,7 @@ async def openai_chat_completions(request: ChatCompletionRequest):
                 user_query,
                 _request_use_link_prediction(request),
                 conversation_history,
+                llm_config,
             )
             return StreamingResponse(
                 stream_response_with_progress(request, result, chat_id),
@@ -535,6 +577,7 @@ async def openai_chat_completions(request: ChatCompletionRequest):
             user_query,
             _request_use_link_prediction(request),
             conversation_history,
+            llm_config,
         )
         full_answer = _build_full_response_text(result)
 

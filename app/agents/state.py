@@ -14,6 +14,7 @@ class AgentState(TypedDict):
     query: str
     session_id: Optional[str]
     use_link_prediction: bool
+    llm_config: Optional[Dict[str, str]]
     
     # Query Analysis
     intent: Optional[str]

@@ -126,6 +126,7 @@ class KGAgentSupervisor:
         use_link_prediction: bool,
         initial_result: Dict[str, Any],
         conversation_history: Optional[str] = None,
+        llm_config: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """질의 분석 결과를 LangGraph 초기 state로 변환"""
         # query_analysis_stage가 target_relation으로 LP 필요성을 판단한 경우 우선 적용
@@ -137,6 +138,7 @@ class KGAgentSupervisor:
             "query": query,
             "session_id": None,
             "use_link_prediction": effective_link_prediction,
+            "llm_config": llm_config,
 
             # query_analysis 결과 병합
             "intent": initial_result.get("intent"),
@@ -247,6 +249,7 @@ class KGAgentSupervisor:
         query: str,
         use_link_prediction: bool,
         conversation_history: Optional[str] = None,
+        llm_config: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """첫 번째 고정 단계인 질의 분석 실행"""
         print("=" * 70)
@@ -258,6 +261,7 @@ class KGAgentSupervisor:
             "query": query,
             "use_link_prediction": use_link_prediction,
             "conversation_history": conversation_history,
+            "llm_config": llm_config,
         })
 
     def stream_query_events(
@@ -265,6 +269,7 @@ class KGAgentSupervisor:
         query: str,
         use_link_prediction: bool = False,
         conversation_history: Optional[str] = None,
+        llm_config: Optional[Dict[str, str]] = None,
     ) -> Iterator[Dict[str, Any]]:
         """
         LangGraph 실행 중 상태 변화를 이벤트로 스트리밍.
@@ -281,7 +286,7 @@ class KGAgentSupervisor:
             )
 
             initial_result = self._run_query_analysis(
-                query, use_link_prediction, conversation_history
+                query, use_link_prediction, conversation_history, llm_config
             )
 
             yield self._emit_event(
@@ -298,6 +303,7 @@ class KGAgentSupervisor:
                 use_link_prediction=use_link_prediction,
                 initial_result=initial_result,
                 conversation_history=conversation_history,
+                llm_config=llm_config,
             )
 
             final_state: Dict[str, Any] = initial_state
@@ -346,6 +352,7 @@ class KGAgentSupervisor:
                                     system_prompt=system_prompt,
                                     user_prompt=user_prompt,
                                     temperature=0.5,
+                                    llm_config=final_state.get("llm_config"),
                                 ):
                                     if not delta:
                                         continue
@@ -426,10 +433,11 @@ class KGAgentSupervisor:
         query: str,
         use_link_prediction: bool = False,
         conversation_history: Optional[str] = None,
+        llm_config: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """사용자 질의 실행"""
         initial_result = self._run_query_analysis(
-            query, use_link_prediction, conversation_history
+            query, use_link_prediction, conversation_history, llm_config
         )
 
         # ── 초기 State ──────────────────────────────────────
@@ -438,6 +446,7 @@ class KGAgentSupervisor:
             use_link_prediction=use_link_prediction,
             initial_result=initial_result,
             conversation_history=conversation_history,
+            llm_config=llm_config,
         )
         
         # ── Supervisor Workflow 실행 ──────────────────────

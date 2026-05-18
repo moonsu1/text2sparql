@@ -96,7 +96,8 @@ JSON 형식으로만 답하세요:
     result = call_llm(
         system_prompt="당신은 질의 분석 전문가입니다.",
         user_prompt=analysis_prompt,
-        temperature=0.1
+        temperature=0.1,
+        llm_config=state.get("llm_config"),
     )
     
     # JSON 파싱 시도
@@ -323,7 +324,8 @@ def text2sparql_node(state: AgentState) -> Dict[str, Any]:
     sparql_result = call_llm(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        temperature=0.1
+        temperature=0.1,
+        llm_config=state.get("llm_config"),
     )
     
     # SPARQL 추출
@@ -425,7 +427,8 @@ def answer_generation_node(state: AgentState) -> Dict[str, Any]:
     answer = call_llm(
         system_prompt=ANSWER_GENERATION_SYSTEM,
         user_prompt=user_prompt,
-        temperature=0.5
+        temperature=0.5,
+        llm_config=state.get("llm_config"),
     )
     
     # Sources 추출 (event IDs)

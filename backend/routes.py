@@ -14,7 +14,14 @@ load_dotenv()
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from backend.models import ChatRequest, ChatResponse, HealthResponse
+from backend.models import (
+    ChatRequest,
+    ChatResponse,
+    HealthResponse,
+    LinkPredictRequest,
+    LinkPredictResponse,
+    LinkPredictionItem,
+)
 from app.step3_load.fuseki_executor import FusekiSPARQLExecutor
 from app.config import RDF_OUTPUT_DIR, FUSEKI_URL, FUSEKI_DATASET
 
@@ -53,7 +60,7 @@ def get_agent():
         ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         ollama_model = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
         fuseki_url = os.getenv("FUSEKI_URL", FUSEKI_URL)
-        print(f"[ROUTE] LLM_PROVIDER: {provider}", flush=True)
+        print(f"[ROUTE] DEFAULT_LLM_PROVIDER: {provider}", flush=True)
         if provider in ("ollama", "qwen", "local"):
             print(f"[ROUTE] OLLAMA_BASE_URL: {ollama_url}", flush=True)
             print(f"[ROUTE] OLLAMA_MODEL: {ollama_model}", flush=True)
@@ -166,4 +173,52 @@ async def chat(request: ChatRequest):
         import traceback
         print(f"[ROUTE ERROR] Exception: {e}", flush=True)  # DEBUG
         print(f"[ROUTE ERROR] Traceback:\n{traceback.format_exc()}", flush=True)  # DEBUG
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/v1/link-predict", response_model=LinkPredictResponse)
+async def link_predict(request: LinkPredictRequest):
+    """
+    Lightweight LP endpoint for external orchestrators such as Hermes.
+    This reuses the backend container's trained/runtime environment instead of
+    importing torch-based LP code inside a separate MCP virtualenv.
+    """
+    try:
+        from app.link_prediction.kg_model_manager import get_model_manager
+
+        mgr = get_model_manager()
+        ready = mgr.ensure_ready()
+        if not ready:
+            return LinkPredictResponse(
+                head_uri=request.head_uri,
+                relation=request.relation,
+                predictions=[],
+                model_ready=False,
+                node_type_filter=request.node_type_filter,
+                error="KG link prediction model is not ready.",
+            )
+
+        predictions = mgr.predict(
+            request.head_uri,
+            request.relation,
+            top_k=request.top_k,
+            node_type_filter=request.node_type_filter,
+        )
+
+        return LinkPredictResponse(
+            head_uri=request.head_uri,
+            relation=request.relation,
+            predictions=[
+                LinkPredictionItem(tail_uri=tail_uri, confidence=confidence)
+                for tail_uri, confidence in predictions
+            ],
+            model_ready=True,
+            node_type_filter=request.node_type_filter,
+            error=None,
+        )
+    except Exception as e:
+        import traceback
+
+        print(f"[ROUTE ERROR] LP Exception: {e}", flush=True)
+        print(f"[ROUTE ERROR] LP Traceback:\n{traceback.format_exc()}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
